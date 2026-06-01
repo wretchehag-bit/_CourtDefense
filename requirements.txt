@@ -1,0 +1,11 @@
+anthropic>=0.105.0
+httpx
+python-docx
+pdfplumber
+pypdf
+faster-whisper
+torch
+fastapi
+uvicorn[standard]
+python-multipart
+imageio-ffmpeg

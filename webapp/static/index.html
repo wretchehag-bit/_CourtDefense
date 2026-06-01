@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Court Defense AI System</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #0f1117;
+    --surface: #1a1d27;
+    --border:  #2a2d3a;
+    --accent:  #4f8ef7;
+    --green:   #22c55e;
+    --yellow:  #f59e0b;
+    --red:     #ef4444;
+    --text:    #e2e8f0;
+    --muted:   #64748b;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+  header { padding: 20px 32px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header span { font-size: 13px; color: var(--muted); }
+  .badge { background: #1e3a5f; color: var(--accent); padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+
+  .layout { display: grid; grid-template-columns: 380px 1fr; gap: 0; height: calc(100vh - 65px); }
+
+  .sidebar { border-right: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+
+  /* API Key */
+  .api-section label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+  .api-row { display: flex; gap: 8px; }
+  .api-row input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 12px; font-family: monospace; }
+  .api-row input:focus { outline: none; border-color: var(--accent); }
+  .btn-save { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .btn-save:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Upload zone */
+  .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 24px 16px; text-align: center; cursor: pointer; transition: all .2s; }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: rgba(79,142,247,.06); }
+  .drop-zone .icon { font-size: 28px; margin-bottom: 8px; }
+  .drop-zone p { font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .drop-zone p b { color: var(--text); }
+  #file-input { display: none; }
+  .file-types { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* File list */
+  #file-list { display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto; }
+  .file-chip { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 11px; display: flex; justify-content: space-between; align-items: center; }
+  .file-chip .fname { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+  .file-chip .ftype { color: var(--accent); font-size: 10px; margin-left: 6px; padding: 1px 5px; background: rgba(79,142,247,.12); border-radius: 4px; }
+  .file-chip .fsize { color: var(--muted); font-size: 10px; }
+
+  /* Buttons */
+  .btn { width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover:not(:disabled) { opacity: .85; }
+
+  /* Results list */
+  .results-list { display: flex; flex-direction: column; gap: 4px; }
+  .result-item { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .result-item a { color: var(--accent); text-decoration: none; }
+  .result-item a:hover { text-decoration: underline; }
+  .result-item .kb { color: var(--muted); }
+  .results-title { font-size: 12px; color: var(--muted); margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+
+  /* Main panel */
+  .main { padding: 24px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
+
+  /* Stage timeline */
+  .stages { display: flex; gap: 0; }
+  .stage { flex: 1; text-align: center; position: relative; }
+  .stage::before { content: ''; position: absolute; top: 15px; left: 50%; right: -50%; height: 2px; background: var(--border); z-index: 0; }
+  .stage:last-child::before { display: none; }
+  .stage-dot { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--border); background: var(--surface); display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; font-size: 14px; position: relative; z-index: 1; transition: all .3s; }
+  .stage-label { font-size: 11px; color: var(--muted); }
+  .stage.active .stage-dot  { border-color: var(--accent); background: rgba(79,142,247,.15); animation: pulse 1.5s infinite; }
+  .stage.done .stage-dot    { border-color: var(--green); background: rgba(34,197,94,.15); }
+  .stage.error .stage-dot   { border-color: var(--red); background: rgba(239,68,68,.15); }
+  .stage.active .stage-label { color: var(--accent); font-weight: 600; }
+  .stage.done   .stage-label { color: var(--green); }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.12)} }
+
+  /* Progress bar */
+  .progress-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
+  .progress-header { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 13px; }
+  .progress-header .label { font-weight: 600; }
+  .progress-header .pct   { color: var(--accent); font-weight: 700; }
+  .progress-bar { background: var(--border); border-radius: 4px; height: 8px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), #818cf8); border-radius: 4px; transition: width .5s ease; }
+  .progress-msg { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Log */
+  .log-wrap { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; flex: 1; display: flex; flex-direction: column; min-height: 260px; }
+  .log-header { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; }
+  .log-body { padding: 12px 16px; overflow-y: auto; flex: 1; font-family: 'Consolas', monospace; font-size: 11.5px; line-height: 1.6; }
+  .log-body .line { color: #94a3b8; }
+  .log-body .line.ok  { color: var(--green); }
+  .log-body .line.err { color: var(--red); }
+  .log-body .line.hi  { color: var(--text); font-weight: 600; }
+
+  .hidden { display: none !important; }
+  #idle-msg { text-align: center; padding: 60px 20px; color: var(--muted); }
+  #idle-msg .big { font-size: 48px; margin-bottom: 12px; }
+
+  .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; }
+  .alert-warn { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.3); color: var(--yellow); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="badge">⚖️ Court Defense AI</div>
+  <h1>Система Захисту</h1>
+  <span>Завантаж файли → отримай аналіз</span>
+</header>
+
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <!-- API Key -->
+    <div class="api-section">
+      <label>🔑 ANTHROPIC API KEY</label>
+      <div class="api-row">
+        <input type="password" id="api-key" placeholder="sk-ant-api03-..." autocomplete="off">
+        <button class="btn-save" onclick="saveKey()">Зберегти</button>
+      </div>
+      <div id="key-status" style="font-size:11px;margin-top:5px;color:var(--muted)"></div>
+    </div>
+
+    <!-- Upload zone -->
+    <div>
+      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <div class="icon">📂</div>
+        <p><b>Перетягни файли</b> або клікни</p>
+        <div class="file-types">🎵 .m4a .mp3 .wav .flac .ogg .aac .wma<br>📄 .pdf .docx .txt</div>
+      </div>
+      <input type="file" id="file-input" multiple
+             accept=".m4a,.mp3,.wav,.flac,.ogg,.aac,.wma,.pdf,.docx,.txt">
+    </div>
+
+    <!-- Selected file list -->
+    <div id="file-list-wrap" class="hidden">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600;">ВИБРАНІ ФАЙЛИ</div>
+      <div id="file-list"></div>
+    </div>
+
+    <button class="btn btn-primary" id="btn-upload" onclick="doUpload()" disabled>
+      ⬆️ Завантажити та запустити аналіз
+    </button>
+
+    <!-- PDF Converter -->
+    <div style="border-top:1px solid var(--border);padding-top:16px;">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;">
+        📄 PDF → Текст (OCR)
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5;">
+        Для сканованих / рукописних документів.<br>
+        Підтримка будь-якого розміру (135+ стор.).
+      </div>
+      <div class="drop-zone" id="pdf-drop-zone" onclick="document.getElementById('pdf-input').click()" style="padding:14px 12px;">
+        <div class="icon" style="font-size:22px;margin-bottom:4px;">📑</div>
+        <p style="font-size:12px;"><b>Перетягни PDF</b> або клікни</p>
+        <div class="file-types">тільки .pdf</div>
+      </div>
+      <input type="file" id="pdf-input" multiple accept=".pdf">
+      <div id="pdf-file-list" style="margin-top:6px;font-size:11px;color:var(--accent);min-height:14px;"></div>
+      <button class="btn btn-secondary" id="btn-convert" onclick="doConvertPdf()" disabled
+              style="margin-top:10px;font-size:13px;padding:10px;">
+        🔍 Розпізнати текст
+      </button>
+    </div>
+
+    <!-- Results -->
+    <div id="results-section" class="hidden">
+      <div class="results-title">📁 Готові документи</div>
+      <div class="results-list" id="results-list"></div>
+    </div>
+
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <div id="idle-msg">
+      <div class="big">⚖️</div>
+      <div>Завантаж аудіо чи документи справи<br>— система сама розбере і проаналізує</div>
+    </div>
+
+    <!-- Pipeline UI -->
+    <div id="pipeline-ui" class="hidden">
+      <div class="stages" id="stages">
+        <div class="stage" id="st-uploaded">
+          <div class="stage-dot">📁</div>
+          <div class="stage-label">Завантажено</div>
+        </div>
+        <div class="stage" id="st-transcribing">
+          <div class="stage-dot">🎙️</div>
+          <div class="stage-label">Транскрипція</div>
+        </div>
+        <div class="stage" id="st-extracting">
+          <div class="stage-dot">📄</div>
+          <div class="stage-label">Документи</div>
+        </div>
+        <div class="stage" id="st-analyzing">
+          <div class="stage-dot">⚖️</div>
+          <div class="stage-label">Аналіз Claude</div>
+        </div>
+        <div class="stage" id="st-completed">
+          <div class="stage-dot">✅</div>
+          <div class="stage-label">Готово</div>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap">
+        <div class="progress-header">
+          <span class="label" id="prog-label">Очікування...</span>
+          <span class="pct" id="prog-pct">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="prog-fill" style="width:0%"></div>
+        </div>
+        <div class="progress-msg" id="prog-msg"></div>
+      </div>
+
+      <div id="no-credits" class="alert alert-warn hidden">
+        ⚠️ <b>API баланс вичерпано.</b> Поповни на <a href="https://console.anthropic.com" target="_blank" style="color:var(--yellow)">console.anthropic.com</a> → Billing.
+      </div>
+
+      <!-- Log -->
+      <div class="log-wrap">
+        <div class="log-header">
+          <span>📋 Лог виконання</span>
+          <span id="log-count" style="color:var(--muted)">0 рядків</span>
+        </div>
+        <div class="log-body" id="log-body"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+let currentTaskId = null;
+let pollTimer     = null;
+let selectedFiles = [];
+let apiKey        = localStorage.getItem('api_key') || '';
+
+// ── Init ─────────────────────────────────────────────────────────────────
+if (apiKey) {
+  document.getElementById('api-key').value = apiKey;
+  document.getElementById('key-status').textContent = '✓ Ключ збережено';
+  document.getElementById('key-status').style.color = 'var(--green)';
+}
+
+function saveKey() {
+  apiKey = document.getElementById('api-key').value.trim();
+  localStorage.setItem('api_key', apiKey);
+  document.getElementById('key-status').textContent = apiKey ? '✓ Збережено' : 'Очищено';
+  document.getElementById('key-status').style.color = apiKey ? 'var(--green)' : 'var(--muted)';
+}
+
+// ── Drag & Drop ───────────────────────────────────────────────────────────
+const drop = document.getElementById('drop-zone');
+drop.addEventListener('dragover',  e => { e.preventDefault(); drop.classList.add('drag-over'); });
+drop.addEventListener('dragleave', ()=> drop.classList.remove('drag-over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault(); drop.classList.remove('drag-over');
+  if (e.dataTransfer.files.length) setFiles(Array.from(e.dataTransfer.files));
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files.length) setFiles(Array.from(e.target.files));
+});
+
+const AUDIO_EXTS = new Set(['.m4a','.mp3','.wav','.flac','.ogg','.aac','.wma']);
+const DOC_EXTS   = new Set(['.pdf','.docx','.txt']);
+
+function fileType(name) {
+  const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
+  if (AUDIO_EXTS.has(ext)) return '🎵 аудіо';
+  if (DOC_EXTS.has(ext))   return '📄 документ';
+  return '❓';
+}
+
+function setFiles(files) {
+  selectedFiles = files;
+  const wrap = document.getElementById('file-list-wrap');
+  const list = document.getElementById('file-list');
+  list.innerHTML = '';
+  files.forEach(f => {
+    const chip = document.createElement('div');
+    chip.className = 'file-chip';
+    chip.innerHTML = `
+      <span class="fname">${f.name}</span>
+      <span class="ftype">${fileType(f.name)}</span>
+      <span class="fsize">${Math.round(f.size/1024)} KB</span>`;
+    list.appendChild(chip);
+  });
+  wrap.classList.remove('hidden');
+  document.getElementById('btn-upload').disabled = false;
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────
+async function doUpload() {
+  if (!selectedFiles.length) return;
+
+  const fd = new FormData();
+  selectedFiles.forEach(f => fd.append('files', f));
+  fd.append('api_key', apiKey);
+
+  showPipeline();
+  addLog(`Завантажую ${selectedFiles.length} файл(ів)...`, 'hi');
+
+  try {
+    const res = await fetch('/upload', { method: 'POST', body: fd });
+    if (!res.ok) { addLog(`HTTP помилка: ${res.status}`, 'err'); return; }
+    const data = await res.json();
+    if (data.task_id) startPolling(data.task_id);
+    else addLog('Помилка завантаження', 'err');
+  } catch(e) {
+    addLog(`Мережева помилка: ${e}`, 'err');
+  }
+}
+
+// ── Polling ───────────────────────────────────────────────────────────────
+function startPolling(tid) {
+  currentTaskId = tid;
+  if (pollTimer) clearInterval(pollTimer);
+  lastLogLen = 0;
+  pollTimer = setInterval(() => poll(tid), 1200);
+  poll(tid);
+}
+
+let lastLogLen = 0;
+
+async function poll(tid) {
+  try {
+    const res = await fetch(`/status/${tid}`);
+    if (!res.ok) return;
+    const t = await res.json();
+
+    updateProgress(t.progress, t.label, t.message);
+    updateStages(t.stage);
+
+    const newLines = t.logs.slice(lastLogLen);
+    newLines.forEach(l => addLog(l));
+    lastLogLen = t.logs.length;
+
+    if (t.logs.some(l => l.includes('credit balance is too low'))) {
+      document.getElementById('no-credits').classList.remove('hidden');
+    }
+
+    if (t.stage === 'completed' || t.stage === 'error') {
+      clearInterval(pollTimer);
+      if (t.files && t.files.length) showResults(t.files);
+    }
+  } catch(e) { /* network hiccup */ }
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────
+function showPipeline() {
+  document.getElementById('idle-msg').classList.add('hidden');
+  document.getElementById('pipeline-ui').classList.remove('hidden');
+  document.getElementById('no-credits').classList.add('hidden');
+  document.getElementById('log-body').innerHTML = '';
+  lastLogLen = 0;
+}
+
+function updateProgress(pct, label, msg) {
+  document.getElementById('prog-pct').textContent  = pct + '%';
+  document.getElementById('prog-fill').style.width = pct + '%';
+  if (label) document.getElementById('prog-label').textContent = label;
+  if (msg)   document.getElementById('prog-msg').textContent   = msg;
+}
+
+const STAGE_ORDER = ['uploaded','transcribing','extracting','analyzing','completed'];
+
+function updateStages(active) {
+  if (active === 'error') active = 'analyzing';
+  const idx = STAGE_ORDER.indexOf(active);
+  STAGE_ORDER.forEach((s, i) => {
+    const el = document.getElementById('st-' + s);
+    if (!el) return;
+    el.className = 'stage';
+    if (i < idx) el.classList.add('done');
+    else if (i === idx) el.classList.add('active');
+  });
+  if (active === 'error') {
+    const el = document.getElementById('st-analyzing');
+    if (el) el.classList.add('error');
+  }
+}
+
+function addLog(line, cls = '') {
+  if (!line || !line.trim()) return;
+  const div  = document.getElementById('log-body');
+  const span = document.createElement('div');
+  span.className = 'line ' + (
+    line.includes('✓') || line.includes('✅') ? 'ok' :
+    line.includes('[!]') || line.includes('ERROR') || line.includes('Помилка') ? 'err' :
+    line.includes('══') || line.includes('║') || line.includes('╔') ? 'hi' :
+    cls
+  );
+  span.textContent = line;
+  div.appendChild(span);
+  div.scrollTop = div.scrollHeight;
+  document.getElementById('log-count').textContent = div.children.length + ' рядків';
+}
+
+function showResults(files) {
+  const sec  = document.getElementById('results-section');
+  const list = document.getElementById('results-list');
+  list.innerHTML = '';
+  files.slice(0, 20).forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'result-item';
+    div.innerHTML = `<a href="/download/${f.path}" target="_blank">${f.name}</a><span class="kb">${f.kb} KB</span>`;
+    list.appendChild(div);
+  });
+  sec.classList.remove('hidden');
+}
+
+// ── PDF Converter ─────────────────────────────────────────────────────────
+let selectedPdfs = [];
+
+const pdfDrop = document.getElementById('pdf-drop-zone');
+pdfDrop.addEventListener('dragover',  e => { e.preventDefault(); pdfDrop.classList.add('drag-over'); });
+pdfDrop.addEventListener('dragleave', ()=> pdfDrop.classList.remove('drag-over'));
+pdfDrop.addEventListener('drop', e => {
+  e.preventDefault(); pdfDrop.classList.remove('drag-over');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+  if (files.length) setPdfs(files);
+});
+document.getElementById('pdf-input').addEventListener('change', e => {
+  if (e.target.files.length) setPdfs(Array.from(e.target.files));
+});
+
+function setPdfs(files) {
+  selectedPdfs = files;
+  const names = files.map(f => `${f.name} (${Math.round(f.size/1024)} KB)`).join(', ');
+  document.getElementById('pdf-file-list').textContent = names;
+  document.getElementById('btn-convert').disabled = false;
+}
+
+async function doConvertPdf() {
+  if (!selectedPdfs.length) return;
+  const fd = new FormData();
+  selectedPdfs.forEach(f => fd.append('files', f));
+  fd.append('api_key', apiKey);
+
+  showPipeline();
+  const totalMb = selectedPdfs.reduce((s,f)=>s+f.size,0)/1024/1024;
+  addLog(`PDF → Текст: ${selectedPdfs.length} файл(ів), ${totalMb.toFixed(1)} MB`, 'hi');
+  if (totalMb > 30 || selectedPdfs.some(f => f.size > 5*1024*1024)) {
+    addLog('Великий PDF — буде пакетний OCR з паузами між батчами (~1-5 хв)', '');
+  }
+
+  try {
+    const res = await fetch('/convert-pdf', { method: 'POST', body: fd });
+    if (!res.ok) { addLog(`HTTP помилка: ${res.status}`, 'err'); return; }
+    const data = await res.json();
+    if (data.task_id) startPolling(data.task_id);
+    else addLog('Помилка запуску', 'err');
+  } catch(e) {
+    addLog(`Мережева помилка: ${e}`, 'err');
+  }
+}
+
+// ── Load existing results on page load ────────────────────────────────────
+fetch('/results').then(r => r.json()).then(d => {
+  if (d.files && d.files.length > 0) showResults(d.files);
+});
+</script>
+</body>
+</html>

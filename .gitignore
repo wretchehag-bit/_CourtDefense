@@ -1,0 +1,71 @@
+# ── Personal case data — NEVER commit ────────────────────────────────────
+case_config.py
+
+# ── Audio / video / documents (user data) ────────────────────────────────
+*.m4a
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.wma
+*.aac
+*.pdf
+*.docx
+*.zip
+
+# ── Pipeline output ───────────────────────────────────────────────────────
+ПАКЕТ_ЗАХИСТУ/
+ВІДІБРАНІ_ДОКАЗИ/
+Отсортированные_данные_для_суда/
+СУДОВІ_ДОКУМЕНТИ/
+готовые_нарезки/
+jobs/
+
+# ── Cache / logs ──────────────────────────────────────────────────────────
+.advocate_cache.json
+processed_files.log
+_raw_analysis.json
+DEFENSE_ANALYSIS_FULL.txt
+
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+*.egg-info/
+
+# ── PyInstaller build output ──────────────────────────────────────────────
+dist/
+build_tmp/
+*.spec
+
+# ── Launcher saved settings (contains API key) ───────────────────────────
+.launcher_settings.json
+
+# ── Android build artifacts ───────────────────────────────────────────────
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android_standalone/.gradle/
+android_standalone/build/
+android_standalone/app/build/
+android_standalone/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# ── Claude Code ───────────────────────────────────────────────────────────
+.claude/
+
+# ── IDE ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.iml
+.DS_Store
+Thumbs.db

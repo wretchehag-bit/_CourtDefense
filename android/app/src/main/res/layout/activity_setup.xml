@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="32dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="⚖️"
+        android:textSize="52sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="@string/app_name"
+        android:textColor="@color/text"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:text="Server address"
+        android:textColor="@color/muted"
+        android:textSize="12sp"
+        android:textAllCaps="true"
+        android:letterSpacing="0.08" />
+
+    <EditText
+        android:id="@+id/url_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/input_bg"
+        android:hint="192.168.1.100  or  myserver.com"
+        android:textColor="@color/text"
+        android:textColorHint="@color/muted"
+        android:textSize="15sp"
+        android:fontFamily="monospace"
+        android:padding="14dp"
+        android:inputType="textUri"
+        android:imeOptions="actionDone"
+        android:singleLine="true" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="Port 8000 is added automatically.\nMake sure CourtDefense.exe is running on the PC\nand both devices are on the same Wi-Fi."
+        android:textColor="@color/muted"
+        android:textSize="12sp"
+        android:lineSpacingMultiplier="1.4" />
+
+    <Button
+        android:id="@+id/btn_connect"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:background="@drawable/btn_primary_bg"
+        android:text="Connect"
+        android:textColor="#ffffff"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:padding="14dp"
+        android:stateListAnimator="@null" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="How to find your PC's IP address:\nWindows: open CMD → type  ipconfig\nLook for IPv4 Address (e.g. 192.168.1.100)"
+        android:textColor="@color/muted"
+        android:textSize="12sp"
+        android:lineSpacingMultiplier="1.5"
+        android:background="@drawable/hint_bg"
+        android:padding="14dp" />
+
+</LinearLayout>

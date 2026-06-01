@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Dark background -->
+    <path android:fillColor="#1a1d27" android:pathData="M0,0h108v108h-108z"/>
+    <!-- Scale / balance icon (simplified) -->
+    <path android:fillColor="#4f8ef7"
+        android:pathData="M54,18 L54,90 M36,36 L72,36 M28,54 L44,54 M64,54 L80,54
+                          M36,36 L28,54 L44,54 Z M72,36 L64,54 L80,54 Z"
+        android:strokeWidth="4"
+        android:strokeColor="#4f8ef7"
+        android:fillAlpha="0"/>
+    <!-- Simplified gavel -->
+    <path android:fillColor="#4f8ef7"
+        android:pathData="M38,62 Q38,70 46,70 L62,70 Q70,70 70,62 L70,50 Q70,42 62,42
+                          L46,42 Q38,42 38,50 Z"/>
+    <path android:fillColor="#e2e8f0"
+        android:pathData="M44,50 L64,50 L64,62 L44,62 Z"/>
+</vector>

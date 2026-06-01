@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg">
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="20dp">
+
+        <!-- Anthropic -->
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="ANTHROPIC API KEY  (required)"
+            android:textColor="@color/muted" android:textSize="11sp"
+            android:textAllCaps="true" android:letterSpacing="0.08"
+            android:layout_marginBottom="6dp"/>
+
+        <EditText android:id="@+id/et_anthropic_key"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/input_bg" android:padding="14dp"
+            android:hint="sk-ant-api03-…"
+            android:textColor="@color/text" android:textColorHint="@color/muted"
+            android:fontFamily="monospace" android:textSize="13sp"
+            android:inputType="textPassword"/>
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Get one at console.anthropic.com → API Keys"
+            android:textColor="@color/muted" android:textSize="11sp"
+            android:layout_marginTop="6dp" android:layout_marginBottom="24dp"/>
+
+        <!-- OpenAI -->
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="OPENAI API KEY  (optional — for audio transcription)"
+            android:textColor="@color/muted" android:textSize="11sp"
+            android:textAllCaps="true" android:letterSpacing="0.08"
+            android:layout_marginBottom="6dp"/>
+
+        <EditText android:id="@+id/et_openai_key"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/input_bg" android:padding="14dp"
+            android:hint="sk-…"
+            android:textColor="@color/text" android:textColorHint="@color/muted"
+            android:fontFamily="monospace" android:textSize="13sp"
+            android:inputType="textPassword"/>
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Used for Whisper audio transcription.\nWithout this key audio files will be skipped.\nGet one at platform.openai.com → API keys"
+            android:textColor="@color/muted" android:textSize="11sp"
+            android:lineSpacingMultiplier="1.5"
+            android:layout_marginTop="6dp" android:layout_marginBottom="32dp"/>
+
+        <Button android:id="@+id/btn_save"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Save"
+            android:textColor="#ffffff"
+            android:backgroundTint="@color/accent"
+            android:stateListAnimator="@null"
+            android:padding="14dp"/>
+
+    </LinearLayout>
+</ScrollView>

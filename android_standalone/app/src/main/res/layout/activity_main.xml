@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/bg">
+
+    <!-- Header -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:background="@color/surface" android:padding="16dp"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="⚖️  Court Defense AI"
+            android:textColor="@color/text" android:textSize="17sp" android:textStyle="bold"/>
+        <ImageButton android:id="@+id/btn_settings_icon"
+            android:layout_width="40dp" android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_preferences"
+            android:contentDescription="Settings"
+            android:onClick="onSettingsClick"/>
+    </LinearLayout>
+
+    <!-- Status bar -->
+    <TextView android:id="@+id/tv_status"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:background="@color/surface" android:padding="10dp"
+        android:textColor="@color/muted" android:textSize="12sp"
+        android:text="Add audio or documents to begin"/>
+
+    <ProgressBar android:id="@+id/progress_bar"
+        android:layout_width="match_parent" android:layout_height="3dp"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:indeterminate="true"
+        android:indeterminateTint="@color/accent"
+        android:visibility="gone"/>
+
+    <!-- File list -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rv_files"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="12dp"
+        android:clipToPadding="false"/>
+
+    <!-- Log area (hidden until running) -->
+    <ScrollView android:id="@+id/log_scroll"
+        android:layout_width="match_parent" android:layout_height="160dp"
+        android:background="@color/surface"
+        android:visibility="gone">
+        <TextView android:id="@+id/tv_log"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:fontFamily="monospace" android:textSize="11sp"
+            android:textColor="#94a3b8" android:padding="10dp"
+            android:lineSpacingMultiplier="1.4"/>
+    </ScrollView>
+
+    <!-- Bottom buttons -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:padding="14dp" android:spacing="10dp"
+        android:background="@color/surface">
+
+        <Button android:id="@+id/btn_add_files"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="＋ Add Files"
+            android:textColor="@color/text"
+            android:backgroundTint="@color/border"
+            android:stateListAnimator="@null"/>
+
+        <Button android:id="@+id/btn_analyze"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:layout_marginStart="10dp"
+            android:text="▶ Analyze"
+            android:textColor="#ffffff"
+            android:backgroundTint="@color/accent"
+            android:enabled="false"
+            android:stateListAnimator="@null"/>
+    </LinearLayout>
+
+</LinearLayout>
