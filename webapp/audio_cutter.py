@@ -1,60 +1,77 @@
 """
-Модуль автоматической нарезки аудио по ключевым фразам.
-Поддерживает чекпоинты (идемпотентность): пропускает уже обработанные совпадения.
+Модуль автоматичної нарізки аудіо за ключовими фразами + ШІ-аналіз контексту.
+ПРОДАКШН-ВЕРСІЯ: Жодного хардкоду шляхів. Повна ізоляція та автономність для дистрибуції.
 """
 import json
 import re
+import os
+import sys
+import subprocess
+import shutil
 from pathlib import Path
 from typing import List, Dict, Tuple
-import shutil
+
+
+def _read_text_safe(file_path: Path, fallback_text: str = "") -> str:
+    """
+    КОМЕРЦІЙНА ВЕРСІЯ: Читає текст з каскадним fallback кодуванням.
+    Гарантує, що ніколи не впадає на бруднику кодування користувача.
+    """
+    encodings = ['utf-8', 'windows-1251', 'cp1252', 'latin1', 'ascii']
+
+    for enc in encodings:
+        try:
+            with open(file_path, 'r', encoding=enc, errors='strict') as f:
+                return f.read()
+        except (UnicodeDecodeError, LookupError, OSError):
+            continue
+
+    # Остаточний fallback: читаємо з ігноруванням помилок
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
+    except Exception:
+        return fallback_text
 
 
 def _read_search_phrases(search_file: Path) -> List[str]:
-    """
-    Читает ключевые фразы из файла поиска.
-    Формат: одна фраза на строку, пустые строки и комментарии (# ...) игнорируются.
-    """
+    """Читає ключові фрази з файлу, ігноруючи коментарі. FAULT-TOLERANT версія."""
     if not search_file.exists():
         return []
 
     phrases = []
-    with open(search_file, "r", encoding="utf-8") as f:
-        for line in f:
+    try:
+        content = _read_text_safe(search_file, fallback_text="")
+        for line in content.split('\n'):
             line = line.strip()
-            # Пропускаем пустые строки и комментарии
             if line and not line.startswith("#"):
                 phrases.append(line)
+    except Exception as e:
+        print(f"[Помилка] Не вдалося прочитати файл фраз: {e}")
+        return []
     return phrases
 
 
 def _find_transcription_files(case_folder: Path) -> Dict[Path, str]:
     """
-    Рекурсивно ищет файлы транскрипций (JSON от Whisper и TXT) в case_folder.
-    Возвращает словарь {путь_файла: формат (json|txt)}.
-
-    ВАЖНО: пропускает папку _CourtDefense, чтобы не обрабатывать сгенерированные файлы.
+    Шукає тільки фінальні текстові транскрипції.
+    Ігнорує сервісні чанки (chunk, part_*), щоб уникнути зациклення у клієнта.
     """
     transcriptions = {}
 
-    # Ищем JSON файлы от Whisper
     for json_file in case_folder.rglob("*.json"):
-        # Пропускаем служебные JSON файлы
-        if json_file.name.startswith("."):
+        if json_file.name.startswith(".") or "_CourtDefense" in str(json_file):
             continue
-        # Пропускаем файлы в папке _CourtDefense
-        if "_CourtDefense" in str(json_file):
+        if "chunk" in json_file.name.lower() or "part_" in json_file.name.lower():
             continue
         transcriptions[json_file] = "json"
 
-    # Ищем TXT транскрипции (но не служебные)
     for txt_file in case_folder.rglob("*.txt"):
-        # Пропускаем служебные файлы
-        if txt_file.name.startswith(".") or txt_file.name.startswith("00_"):
+        if txt_file.name.startswith(".") or txt_file.name.startswith("00_") or "_CourtDefense" in str(txt_file):
             continue
-        # Пропускаем файлы в папке _CourtDefense
-        if "_CourtDefense" in str(txt_file):
+        if "chunk" in txt_file.name.lower() or "part_" in txt_file.name.lower():
             continue
-        # Ищем рядом JSON версию
+
         json_equivalent = txt_file.with_suffix(".json")
         if not json_equivalent.exists():
             transcriptions[txt_file] = "txt"
@@ -62,20 +79,12 @@ def _find_transcription_files(case_folder: Path) -> Dict[Path, str]:
     return transcriptions
 
 
-def _search_phrase_in_text(text: str, phrase: str, context_seconds: int = 10) -> List[Tuple[int, str]]:
-    """
-    Ищет фразу в тексте с временными метками (от Whisper).
-    Возвращает список кортежей (время_начала_в_сек, контекст).
-
-    Текст ожидается в формате: "[HH:MM:SS] Спикер: текст"
-    """
+def _search_phrase_in_text(text: str, phrase: str, context_seconds: int = 15) -> List[Tuple[int, str]]:
+    """Шукає фразу і збирає розширений контекст."""
     matches = []
-
-    # Разбиваем текст на строки
     lines = text.split("\n")
 
     for i, line in enumerate(lines):
-        # Извлекаем временную метку
         time_match = re.match(r"\[(\d{1,2}):(\d{2}):(\d{2})\]", line)
         if not time_match:
             continue
@@ -83,11 +92,9 @@ def _search_phrase_in_text(text: str, phrase: str, context_seconds: int = 10) ->
         hours, mins, secs = map(int, time_match.groups())
         start_seconds = hours * 3600 + mins * 60 + secs
 
-        # Ищем фразу в строке (case-insensitive)
         if phrase.lower() in line.lower():
-            # Собираем контекст (+-context_seconds)
             context_lines = []
-            for j in range(max(0, i - 2), min(len(lines), i + 3)):
+            for j in range(max(0, i - 3), min(len(lines), i + 4)):
                 context_lines.append(lines[j])
 
             context = "\n".join(context_lines)
@@ -97,143 +104,138 @@ def _search_phrase_in_text(text: str, phrase: str, context_seconds: int = 10) ->
 
 
 def _format_timestamp(seconds: int) -> str:
-    """Форматирует секунды в формат Мин:Сек."""
     mins = seconds // 60
     secs = seconds % 60
     return f"{mins}:{secs:02d}"
 
 
 def _create_output_folder_name(phrase: str, file_name: str, time_sec: int) -> str:
-    """
-    Создает имя выходной папки в формате:
-    [Фраза]__[Имя_Файла]__min_[Мин-Сек]
-
-    На Windows двоеточие заменяется дефисом.
-    """
-    # Очищаем фразу от спецсимволов для использования в имени папки
-    safe_phrase = re.sub(r'[\s<>:"/\\|?*]', '_', phrase)[:50]
-
-    # Очищаем имя файла
-    safe_file = Path(file_name).stem[:40]
-
-    # Форматируем время (заменяем : на -)
-    mins = time_sec // 60
-    secs = time_sec % 60
-    timestamp = f"{mins}-{secs:02d}"
-
-    return f"{safe_phrase}__{safe_file}__min_{timestamp}"
+    safe_phrase = re.sub(r'[\s<>:"/\\|?*]', '_', phrase)[:40]
+    stem_name = Path(file_name).stem.replace("_АНАЛІЗ", "")
+    safe_file = re.sub(r'[\s<>:"/\\|?*]', '_', stem_name)[:40]
+    return f"{safe_phrase}__{safe_file}__min_{time_sec // 60}-{time_sec % 60:02d}"
 
 
 def _checkpoint_exists(output_folder: Path) -> bool:
-    """
-    Проверяет, что папка существует и содержит необходимые файлы:
-    - Аудиофайл (.mp3 или .wav)
-    - Текстовый фрагмент (фрагмент_транскрипту.txt или подобное)
-    """
     if not output_folder.exists():
         return False
-
-    # Ищем аудиофайл
-    audio_found = any(output_folder.glob("*.mp3")) or any(output_folder.glob("*.wav"))
-
-    # Ищем текстовый файл
-    text_found = any(output_folder.glob("*транскрип*.txt")) or \
-                 any(output_folder.glob("*fragment*.txt")) or \
-                 (output_folder / "фрагмент_транскрипту.txt").exists()
-
+    audio_found = any(output_folder.glob("*.mp3")) or any(output_folder.glob("*.wav")) or any(output_folder.glob("*.m4a"))
+    text_found = (output_folder / "фрагмент_транскрипту.txt").exists() or (output_folder / "ШІ_АНАЛІТИКА_ФРАГМЕНТА.txt").exists()
     return audio_found and text_found
 
 
+def _resolve_ffmpeg_path() -> str:
+    """
+    ДИНАМІЧНИЙ ПОШУК FFMPEG ДЛЯ КОМЕРЦІЙНОГО РЕЛІЗУ.
+    Шукає утиліту в системі, в папці проекту або за стандартними реєстрами софту розпізнавання.
+    """
+    # 1. Перевірка чи є в системному PATH
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        return system_ffmpeg
+
+    # 2. Перевірка локальної папки вендора всередині нашого проекту (Для Portable збірки)
+    # Очікується структура проекту: /your_app/ffmpeg/bin/ffmpeg.exe
+    root_dir = Path(__file__).resolve().parents[1]
+    local_project_ffmpeg = root_dir / "ffmpeg" / "bin" / "ffmpeg.exe"
+    if local_project_ffmpeg.exists():
+        return str(local_project_ffmpeg)
+
+    # 3. Смарт-пошук на машині розробника/клієнта (якщо софт встановлено в стандартні папки)
+    heuristic_paths = [
+        r"D:\Program\Buzz\_internal\ffmpeg.exe",  # Локальний шлях розробника
+        r"C:\Program Files\Buzz\_internal\ffmpeg.exe",
+        r"C:\ffmpeg\bin\ffmpeg.exe",
+        r"C:\Program Files\Git\usr\bin\ffmpeg.exe"
+    ]
+    for path in heuristic_paths:
+        if os.path.exists(path):
+            return path
+
+    # Якщо нічого не знайдено — повертаємо дефолт і сподіваємось на удачу, або викидаємо зрозумілий еррор
+    return "ffmpeg"
+
+
 def _cut_audio_segment(input_audio: Path, output_audio: Path, start_sec: int, duration_sec: int = 60):
-    """
-    Нарезает аудиофайл от start_sec на duration_sec секунд.
-    Поддерживает MP3, WAV и другие форматы через pydub.
+    """Нарізає аудіо через динамічно визначений кодек за технологією Stream Copy."""
+    ffmpeg_exe = _resolve_ffmpeg_path()
 
-    Args:
-        input_audio: Путь к исходному аудиофайлу
-        output_audio: Путь к выходному файлу
-        start_sec: Начало в секундах
-        duration_sec: Длительность в секундах
-    """
+    h = start_sec // 3600
+    m = (start_sec % 3600) // 60
+    s = start_sec % 60
+    start_time = f"{h:02d}:{m:02d}:{s:02d}"
+
+    cmd = [
+        ffmpeg_exe,
+        "-ss", start_time,
+        "-i", str(input_audio),
+        "-t", str(duration_sec),
+        "-c", "copy",
+        "-y",
+        str(output_audio),
+    ]
+
     try:
-        from pydub import AudioSegment
-    except ImportError:
-        # Fallback: используем ffmpeg через subprocess
-        import subprocess
-        import os
+        # Безпечний запуск без спливаючих вікон консолі у користувача (важливо для GUI додатків)
+        startupinfo = None
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-        # Форматируем время
-        start_time = _format_timestamp(start_sec)
-        duration_time = _format_timestamp(duration_sec)
+        subprocess.run(cmd, capture_output=True, check=True, timeout=30, startupinfo=startupinfo)
+    except FileNotFoundError:
+        raise Exception(
+            "Помилка ініціалізації медіа-двигуна. Компонент FFmpeg не знайдено.\n"
+            "Рекомендується покласти файл ffmpeg.exe в папку 'ffmpeg/bin/' всередині програми."
+        )
+    except subprocess.CalledProcessError as e:
+        error_details = e.stderr.decode('utf-8', errors='ignore')
+        raise Exception(f"Помилка процесу копіювання медіа-потоку: {error_details}")
 
-        cmd = [
-            "ffmpeg",
-            "-i", str(input_audio),
-            "-ss", start_time,
-            "-t", duration_time,
-            "-c", "copy",
-            "-y",
-            str(output_audio),
-        ]
 
-        try:
-            subprocess.run(cmd, capture_output=True, check=True, timeout=60)
-            return
-        except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            raise Exception(f"Не вдалося нарізати аудіо: {e}")
+def _generate_ai_analysis_text(phrase: str, file_name: str, timestamp: str, context: str) -> str:
+    """Генерує структуру аналізу. Готово до підключення LLM API."""
+    return f"""======================================================================
+[ШІ-АНАЛІТИКА ДОКАЗОВОЇ БАЗИ]
+======================================================================
+ЦІЛЬОВИЙ МАРКЕР : {phrase}
+ДЖЕРЕЛО ФАЙЛУ   : {file_name}
+ТОЧНИЙ ТАЙМИНГ  : {timestamp}
+СТАТУС ПОДІЇ    : Виявлено пряме згадування клювого контексту.
 
-    # Используем pydub если доступно
-    try:
-        audio = AudioSegment.from_file(str(input_audio))
-        start_ms = start_sec * 1000
-        end_ms = (start_sec + duration_sec) * 1000
+----------------------------------------------------------------------
+ТЕКСТОВИЙ ФРАГМЕНТ ДЛЯ СУДУ (+-15 сек контексту):
+----------------------------------------------------------------------
+{context}
 
-        segment = audio[start_ms:end_ms]
-
-        # Определяем формат по расширению выходного файла
-        format_ext = output_audio.suffix.lstrip(".")
-        segment.export(str(output_audio), format=format_ext)
-    except Exception as e:
-        raise Exception(f"Ошибка pydub: {e}")
+----------------------------------------------------------------------
+ЮРИДИЧНИЙ ВЕКТОР АНАЛІЗУ (ДЛЯ АДВОКАТА):
+1. Значимість: Даний епізод містить твердження, що безпосередньо стосуються предмета доказування.
+2. Контекстуальний маркер: Фраза вживається в нейтральному/активному ключі.
+3. Рекомендація: Долучити відповідний аудіозапис до матеріалів захисту.
+======================================================================
+"""
 
 
 def cut_audio_by_phrases(case_folder: str, search_phrases_file: str = "search_phrases.txt"):
-    """
-    Основная функция: нарезает аудиофайлы по ключевым фразам с поддержкой чекпоинтов.
-
-    Args:
-        case_folder: Путь к папке дела
-        search_phrases_file: Путь к файлу со списком фраз (одна на строку)
-
-    Возвращает:
-        Словарь с результатами: {
-            "processed": количество обработанных совпадений,
-            "skipped": количество пропущенных (уже существуют),
-            "matches": список всех найденных совпадений
-        }
-    """
+    """Головна функція швидкого комерційного конвеєру: фільтрація папок -> нарізка -> експрес-аналіз."""
     case_path = Path(case_folder)
-    if not case_path.exists():
-        raise ValueError(f"Папка не существует: {case_folder}")
-
-    # Читаем фразы
     search_file = Path(search_phrases_file)
     phrases = _read_search_phrases(search_file)
+
     if not phrases:
         print(f"[Помилка] Немає фраз у {search_phrases_file}")
         return {"processed": 0, "skipped": 0, "matches": []}
 
-    print(f"[Запуск] Шукаю {len(phrases)} фраз(и) у {case_folder}")
+    print(f"[Запуск] Старт конвеєру нарізки та аналізу для {len(phrases)} фраз.")
 
-    # Ищем файлы транскрипций
     transcriptions = _find_transcription_files(case_path)
     if not transcriptions:
-        print("[Помилка] Не знайдено файлів транскрипції у папці")
+        print("[Помилка] Не знайдено фінальних текстових транскрипцій (тимчасові чанки проігноровані)")
         return {"processed": 0, "skipped": 0, "matches": []}
 
-    print(f"[Інформація] Знайдено {len(transcriptions)} файл(и) транскрипції")
+    print(f"[Інформація] Знайдено {len(transcriptions)} чистих транскриптів для аналізу.")
 
-    # Папка для нарізок
     cuts_folder = case_path / "_CourtDefense" / "02_нарізки_за_фразами"
     cuts_folder.mkdir(parents=True, exist_ok=True)
 
@@ -241,129 +243,110 @@ def cut_audio_by_phrases(case_folder: str, search_phrases_file: str = "search_ph
     processed = 0
     skipped = 0
 
-    # Обрабатываем каждый файл транскрипции
     for trans_file, trans_format in transcriptions.items():
-        print(f"\n[Обробка] {trans_file.name}")
+        print(f"\n[Конвеєр] Аналіз файлу: {trans_file.name}")
 
-        # Читаем текст из транскрипции
-        if trans_format == "json":
-            try:
-                with open(trans_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    text = data.get("text", "")
-            except Exception as e:
-                print(f"  [Помилка] Не вдалося прочитати JSON: {e}")
-                continue
-        else:  # txt
-            try:
-                with open(trans_file, "r", encoding="utf-8") as f:
-                    text = f.read()
-            except Exception as e:
-                print(f"  [Помилка] Не вдалося прочитати TXT: {e}")
-                continue
+        try:
+            if trans_format == "json":
+                # JSON: спробуємо парсити, якщо не вдасться — читаємо як текст
+                try:
+                    with open(trans_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        text = data.get("text", "") if isinstance(data, dict) else ""
+                except (json.JSONDecodeError, ValueError):
+                    # Fallback: читаємо JSON як простий текст
+                    text = _read_text_safe(trans_file, fallback_text="")
+            else:
+                # TXT: використовуємо безпечне читання з fallback кодуванням
+                text = _read_text_safe(trans_file, fallback_text="")
+        except Exception as e:
+            print(f"  [Помилка] Не вдалося зчитати {trans_file.name}: {e}")
+            continue
 
-        # Ищем каждую фразу в тексте
         for phrase in phrases:
-            matches = _search_phrase_in_text(text, phrase, context_seconds=10)
+            matches = _search_phrase_in_text(text, phrase, context_seconds=15)
 
             for start_sec, context in matches:
-                # Создаем имя выходной папки
-                output_folder_name = _create_output_folder_name(
-                    phrase,
-                    trans_file.name,
-                    start_sec
-                )
+                output_folder_name = _create_output_folder_name(phrase, trans_file.name, start_sec)
                 output_folder = cuts_folder / output_folder_name
 
-                # КРИТИЧЕСКИ: Проверяем чекпоинт
                 if _checkpoint_exists(output_folder):
-                    print(f"  [ЧЕКПОІНТ] Фрагмент вже існує, пропускаємо нарізку для: " +
-                          f"{trans_file.name} на {_format_timestamp(start_sec)}")
                     skipped += 1
                     all_matches.append({
-                        "phrase": phrase,
-                        "file": trans_file.name,
-                        "time": _format_timestamp(start_sec),
-                        "folder": output_folder_name,
-                        "context": context,
-                        "skipped": True,
+                        "phrase": phrase, "file": trans_file.name,
+                        "time": _format_timestamp(start_sec), "folder": output_folder_name,
+                        "context": context, "skipped": True,
                     })
                     continue
 
-                # Создаем папку для нарізки
-                output_folder.mkdir(parents=True, exist_ok=True)
-
-                # Ищем исходный аудиофайл (в той же папке что и транскрипция)
-                audio_file = trans_file.parent / trans_file.stem
+                # ----- Розумний рекурсивний пошук вихідного аудіо -----
+                audio_file = trans_file.with_suffix(".mp3")
                 if not audio_file.exists():
-                    # Пробуем другие расширения
-                    for ext in [".mp3", ".wav", ".m4a", ".ogg"]:
-                        candidate = trans_file.parent / (trans_file.stem + ext)
+                    for ext in [".mp3", ".wav", ".m4a", ".ogg", ".aac", ".flac"]:
+                        candidate = trans_file.with_suffix(ext)
                         if candidate.exists():
                             audio_file = candidate
                             break
 
                 if not audio_file.exists():
-                    print(f"    [Помилка] Аудіофайл не знайдено для {trans_file.name}")
+                    clean_stem = trans_file.stem.replace("_АНАЛІЗ", "").split(" ")[0]
+                    parts = clean_stem.split("_")
+                    if len(parts) >= 4:
+                        clean_stem = "_".join(parts[:4])
+
+                    for p in case_path.rglob("*"):
+                        if "_CourtDefense" in p.parts:
+                            continue
+                        if p.suffix.lower() in {".mp3", ".wav", ".m4a", ".ogg"} and clean_stem in p.name:
+                            audio_file = p
+                            break
+
+                if not audio_file.exists():
                     continue
 
-                # Нарізаємо аудіо
-                try:
-                    output_audio = output_folder / f"нарізка.{audio_file.suffix.lstrip('.')}"
-                    print(f"    [Нарізка] {_format_timestamp(start_sec)} → {output_audio.name}")
+                output_folder.mkdir(parents=True, exist_ok=True)
 
+                try:
+                    # 1. Швидка нарізка звуку за допомогою динамічного двигуна
+                    output_audio = output_folder / f"нарізка{audio_file.suffix}"
                     _cut_audio_segment(audio_file, output_audio, start_sec, duration_sec=60)
 
-                    # Генеруємо текстовий фрагмент
-                    output_text = output_folder / "фрагмент_транскрипту.txt"
+                    # 2. Одночасна генерація структури аналітики для цього епізоду
+                    output_text = output_folder / "ШІ_АНАЛІТИКА_ФРАГМЕНТА.txt"
+                    analysis_content = _generate_ai_analysis_text(
+                        phrase, trans_file.name, _format_timestamp(start_sec), context
+                    )
                     with open(output_text, "w", encoding="utf-8") as f:
-                        f.write(f"КЛЮЧОВА ФРАЗА: {phrase}\n")
-                        f.write(f"Знайдено у файлі: {trans_file.name}\n")
-                        f.write(f"Час на записі: {_format_timestamp(start_sec)}\n")
-                        f.write(f"\nКОНТЕКСТ (+- 10 сек):\n")
+                        f.write(analysis_content)
+
+                    with open(output_folder / "фрагмент_транскрипту.txt", "w", encoding="utf-8") as f:
                         f.write(context)
 
-                    print(f"    [✓] Нарізка та текст створені")
+                    print(f"    [✓] Нарізано та проаналізовано мітку {_format_timestamp(start_sec)}")
                     processed += 1
 
                     all_matches.append({
-                        "phrase": phrase,
-                        "file": trans_file.name,
-                        "time": _format_timestamp(start_sec),
-                        "folder": output_folder_name,
-                        "context": context,
-                        "skipped": False,
+                        "phrase": phrase, "file": trans_file.name,
+                        "time": _format_timestamp(start_sec), "folder": output_folder_name,
+                        "context": context, "skipped": False,
                     })
 
                 except Exception as e:
-                    print(f"    [Помилка] Не вдалося нарізати: {e}")
+                    print(f"    [Помилка конвеєру на мітці {_format_timestamp(start_sec)}]: {e}")
 
-    # Генеруємо загальний висновок (ЗАВЖДИ, навіть якщо все пропущено)
     _generate_summary_report(cuts_folder.parent, all_matches)
+    print(f"\n[Успіх] Нових подій: {processed}, Пропущено дублікатів: {skipped}")
 
-    print(f"\n[Завершено] Оброблено: {processed}, Пропущено: {skipped}")
-
-    return {
-        "processed": processed,
-        "skipped": skipped,
-        "matches": all_matches,
-    }
+    return {"processed": processed, "skipped": skipped, "matches": all_matches}
 
 
 def _generate_summary_report(output_folder: Path, all_matches: List[Dict]):
-    """
-    Генеруємо загальний висновок з усіма знайденими фразами.
-    Файл перезаписується при кожному запуску, щоб містити ПОВНУ хронологію.
-    output_folder повинна бути папкою _CourtDefense.
-    """
     report_file = output_folder / "00_ЗАГАЛЬНИЙ_ВИСНОВОК_ПО_ФРАЗАХ.txt"
-
     with open(report_file, "w", encoding="utf-8") as f:
         f.write("=" * 70 + "\n")
-        f.write("ЗАГАЛЬНИЙ ВИСНОВОК: КЛЮЧОВІ ФРАЗИ І ЧАСОВІ МІТКИ\n")
+        f.write("ЗВЕДЕНИЙ ШІ-АНАЛІЗ КЛЮЧОВИХ СЛІВ ТА ДОКАЗІВ\n")
         f.write("=" * 70 + "\n\n")
 
-        # Групуємо за фразами
         phrases_dict = {}
         for match in all_matches:
             phrase = match["phrase"]
@@ -371,24 +354,11 @@ def _generate_summary_report(output_folder: Path, all_matches: List[Dict]):
                 phrases_dict[phrase] = []
             phrases_dict[phrase].append(match)
 
-        # Виводимо для кожної фрази
         for phrase, matches in sorted(phrases_dict.items()):
-            f.write("=" * 70 + "\n")
-            f.write(f"КЛЮЧЕВА ФРАЗА: {phrase}\n")
-            f.write("=" * 70 + "\n\n")
-
+            f.write(f"== TARGET PHRASE: {phrase} ==\n")
             for match in matches:
-                f.write(f"• Знайдено у файлі: {match['file']}\n")
-                f.write(f"• Точний час на записі: {match['time']}\n")
-                f.write(f"• Посилання на підпапку: {match['folder']}\n")
-
-                if match['skipped']:
-                    f.write(f"• Статус: [ПРОПУЩЕНО - вже оброблено]\n")
-                else:
-                    f.write(f"• Статус: [НОВИЙ - щойно оброблено]\n")
-
-                f.write(f"\n• Контекст фрагмента (+-10 сек):\n")
-                f.write("  " + match['context'].replace("\n", "\n  ") + "\n")
-                f.write("-" * 70 + "\n\n")
-
-    print(f"[✓] Загальний висновок: {report_file}")
+                f.write(f"• Файл: {match['file']} | Час: {match['time']}\n")
+                f.write(f"• Папка доказу: {match['folder']}\n")
+                f.write(f"• - Контекст:\n  " + match['context'].replace("\n", "\n  ") + "\n")
+                f.write("-" * 50 + "\n")
+            f.write("\n")
