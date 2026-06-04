@@ -13,13 +13,28 @@ A single-file Python CLI tool (`import os.py`) that:
 
 Audio is court-proceeding recordings in Ukrainian/surzhyk.
 
-## Running the script
+## Running the application
 
+### Native Desktop App (recommended)
+```powershell
+python run_app.py
+```
+- Launches native window (Windows/macOS/Linux)
+- Auto-starts FastAPI backend on port 8000
+- Allows text selection in reports (critical for advocates)
+- Clean shutdown when window closes
+
+### Web UI (browser-based)
+```powershell
+python start_app.py
+```
+Opens browser at `http://localhost:8000`
+
+### CLI Tool (legacy)
 ```powershell
 python "import os.py"
 ```
-
-The script is interactive — it prompts for a file number then runs without further input.
+Interactive menu for audio splitting and transcription.
 
 ## Key dependency
 
@@ -31,6 +46,8 @@ Install with: `pip install faster-whisper`
 
 ## Directory layout
 
+- `run_app.py` — **Entry point for native desktop app** (pywebview + FastAPI)
+- `start_app.py` — Entry point for web UI (FastAPI in browser)
 - `import os.py` — the original single-file CLI tool (keep the name as-is)
 - `transcribe.py` — standalone transcription script (GPU/CPU auto-detect)
 - `advocate_agent.py` — parallel Claude classifier for transcripts
@@ -38,7 +55,8 @@ Install with: `pip install faster-whisper`
 - `lawyer_analyzer.py` — combined analyzer + court document writer
 - `orchestrator.py` — end-to-end pipeline runner
 - `pipeline.py` — legacy pipeline (ffmpeg + whisper + sort)
-- `webapp/` — FastAPI web UI (`python start_app.py` → http://localhost:8000)
+- `webapp/` — FastAPI application (main.py, services.py, static/)
+- `tests/test_pipeline.py` — Unit tests for PDF processing and API validation
 - `case_config_example.py` — **template**: copy to `case_config.py` and fill in case data
 - `case_config.py` — user's private config (gitignored, never committed)
 - `готовые_нарезки/` — output: `part_N_chunk.<ext>` + `part_N_transcript.txt`

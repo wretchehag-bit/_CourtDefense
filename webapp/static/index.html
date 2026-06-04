@@ -83,6 +83,10 @@
   .stage.error .stage-dot   { border-color: var(--red); background: rgba(239,68,68,.15); }
   .stage.active .stage-label { color: var(--accent); font-weight: 600; }
   .stage.done   .stage-label { color: var(--green); }
+  .stage.clickable.done { cursor: pointer; }
+  .stage.clickable.done .stage-dot { border-color: var(--green); }
+  .stage.clickable.done:hover .stage-dot { background: rgba(34,197,94,.25); transform: scale(1.1); }
+  .stage.clickable.done .stage-label::after { content: ' 🔍'; font-size: 9px; }
   @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.12)} }
 
   /* Progress bar */
@@ -132,6 +136,10 @@
         <button class="btn-save" onclick="saveKey()">Зберегти</button>
       </div>
       <div id="key-status" style="font-size:11px;margin-top:5px;color:var(--muted)"></div>
+      <div id="key-warn" class="hidden"
+           style="font-size:11px;margin-top:4px;color:var(--yellow);line-height:1.4;">
+        ⚠️ Без ключа: транскрипція збережеться, аналіз Claude — ні
+      </div>
     </div>
 
     <!-- Upload zone -->
@@ -154,6 +162,64 @@
     <button class="btn btn-primary" id="btn-upload" onclick="doUpload()" disabled>
       ⬆️ Завантажити та запустити аналіз
     </button>
+
+    <!-- Local Folder -->
+    <div style="border-top:1px solid var(--border);padding-top:16px;">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;font-weight:600;
+                  text-transform:uppercase;letter-spacing:.05em;">
+        📁 Локальна папка
+      </div>
+
+      <!-- Folder picker button (primary) -->
+      <div class="drop-zone" id="folder-drop-zone" onclick="doBrowseFolder()"
+           style="cursor:pointer;padding:20px 12px;">
+        <div class="icon" style="font-size:28px;margin-bottom:6px;">📁</div>
+        <p><b>Натисни щоб вибрати папку</b></p>
+        <p style="margin-top:4px;">Знайде всі аудіо і документи в підпапках</p>
+      </div>
+
+      <!-- Path display + manual edit -->
+      <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
+        <input type="text" id="folder-path"
+               placeholder="або вкажи шлях вручну…"
+               style="flex:1;background:var(--bg);border:1px solid var(--border);
+                      color:var(--text);padding:7px 10px;border-radius:6px;font-size:11px;
+                      font-family:monospace;min-width:0;"
+               oninput="onFolderInput()">
+        <button onclick="doBrowseFolder()"
+                style="padding:7px 10px;background:var(--surface);border:1px solid var(--border);
+                       color:var(--muted);border-radius:6px;cursor:pointer;font-size:12px;
+                       white-space:nowrap;">
+          🗂 Огляд
+        </button>
+      </div>
+
+      <div id="folder-preview"
+           style="margin-top:8px;font-size:12px;color:var(--muted);min-height:16px;line-height:1.6;">
+      </div>
+
+      <!-- Transcript check result -->
+      <div id="folder-check" class="hidden"
+           style="background:var(--bg);border:1px solid var(--border);border-radius:8px;
+                  padding:10px 12px;margin-top:8px;font-size:12px;line-height:1.8;">
+        <div id="check-done"  style="color:var(--green)"></div>
+        <div id="check-todo"  style="color:var(--accent)"></div>
+        <div id="check-where" style="color:var(--muted);font-size:10px;margin-top:2px;
+                                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+      </div>
+
+      <!-- Two action buttons -->
+      <div id="folder-buttons" class="hidden" style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-primary" id="btn-run-new" onclick="doRunFolder(true)"
+                style="flex:1;font-size:12px;padding:10px 6px;">
+          ▶ Тільки нові
+        </button>
+        <button class="btn btn-secondary" id="btn-run-all" onclick="doRunFolder(false)"
+                style="flex:1;font-size:12px;padding:10px 6px;">
+          ↺ Переробити всі
+        </button>
+      </div>
+    </div>
 
     <!-- PDF Converter -->
     <div style="border-top:1px solid var(--border);padding-top:16px;">
@@ -200,15 +266,15 @@
           <div class="stage-dot">📁</div>
           <div class="stage-label">Завантажено</div>
         </div>
-        <div class="stage" id="st-transcribing">
+        <div class="stage clickable" id="st-transcribing" onclick="toggleStageFiles('transcribing')" title="Натисни щоб побачити транскрипції">
           <div class="stage-dot">🎙️</div>
           <div class="stage-label">Транскрипція</div>
         </div>
-        <div class="stage" id="st-extracting">
+        <div class="stage clickable" id="st-extracting" onclick="toggleStageFiles('extracting')" title="Натисни щоб побачити документи">
           <div class="stage-dot">📄</div>
           <div class="stage-label">Документи</div>
         </div>
-        <div class="stage" id="st-analyzing">
+        <div class="stage clickable" id="st-analyzing" onclick="toggleStageFiles('analyzing')" title="Натисни щоб побачити аналіз">
           <div class="stage-dot">⚖️</div>
           <div class="stage-label">Аналіз Claude</div>
         </div>
@@ -218,16 +284,64 @@
         </div>
       </div>
 
-      <!-- Progress -->
+      <!-- Stage files panel (shown when clicking a stage) -->
+      <div id="stage-files-panel" class="hidden"
+           style="background:var(--surface);border:1px solid var(--border);
+                  border-radius:8px;padding:12px 16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span id="sfp-title" style="font-size:12px;font-weight:600;color:var(--accent)"></span>
+          <button onclick="document.getElementById('stage-files-panel').classList.add('hidden')"
+                  style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;">✕</button>
+        </div>
+        <div id="sfp-source" style="font-size:10px;color:var(--muted);margin-bottom:8px;word-break:break-all;"></div>
+        <div id="sfp-list" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;"></div>
+      </div>
+
+      <!-- Progress + Stop -->
       <div class="progress-wrap">
         <div class="progress-header">
           <span class="label" id="prog-label">Очікування...</span>
-          <span class="pct" id="prog-pct">0%</span>
+          <div style="display:flex;align-items:center;gap:12px">
+            <span class="pct" id="prog-pct">0%</span>
+            <button id="btn-stop" onclick="doStop()"
+              style="display:none;padding:4px 12px;border-radius:6px;border:1px solid var(--red);
+                     background:rgba(239,68,68,.12);color:var(--red);font-size:12px;
+                     font-weight:600;cursor:pointer;">
+              ⏹ Стоп
+            </button>
+          </div>
         </div>
         <div class="progress-bar">
           <div class="progress-fill" id="prog-fill" style="width:0%"></div>
         </div>
         <div class="progress-msg" id="prog-msg"></div>
+      </div>
+
+      <!-- Current file card (visible only during transcription) -->
+      <div id="cur-file-card" class="hidden"
+           style="background:var(--surface);border:1px solid var(--border);
+                  border-radius:10px;padding:14px 18px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:12px;font-weight:600;color:var(--accent)">🎙️ Транскрипція</span>
+          <span id="cur-device"
+                style="font-size:11px;color:var(--muted);background:var(--bg);
+                       padding:2px 8px;border-radius:10px;border:1px solid var(--border)"></span>
+        </div>
+        <div id="cur-filename"
+             style="font-size:13px;color:var(--text);white-space:nowrap;
+                    overflow:hidden;text-overflow:ellipsis;margin-bottom:8px"></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:11px;color:var(--muted)">
+            Файл <b id="cur-idx" style="color:var(--text)">1</b>
+            з <b id="cur-total" style="color:var(--text)">?</b>
+          </span>
+          <span id="cur-elapsed" style="font-size:11px;color:var(--muted)"></span>
+        </div>
+        <div style="background:var(--border);border-radius:4px;height:4px;overflow:hidden">
+          <div id="cur-file-fill"
+               style="height:100%;background:var(--accent);border-radius:4px;
+                      transition:width .4s ease;width:0%"></div>
+        </div>
       </div>
 
       <div id="no-credits" class="alert alert-warn hidden">
@@ -248,10 +362,13 @@
 </div>
 
 <script>
-let currentTaskId = null;
-let pollTimer     = null;
-let selectedFiles = [];
-let apiKey        = localStorage.getItem('api_key') || '';
+let currentTaskId  = null;
+let pollTimer      = null;
+let selectedFiles  = [];
+let apiKey         = localStorage.getItem('api_key') || '';
+let lastStageFiles = {};   // stage → [{name,path,kb}]
+let lastSourceDir  = null;
+let openStage      = null;
 
 // ── Init ─────────────────────────────────────────────────────────────────
 if (apiKey) {
@@ -265,7 +382,11 @@ function saveKey() {
   localStorage.setItem('api_key', apiKey);
   document.getElementById('key-status').textContent = apiKey ? '✓ Збережено' : 'Очищено';
   document.getElementById('key-status').style.color = apiKey ? 'var(--green)' : 'var(--muted)';
+  document.getElementById('key-warn').classList.toggle('hidden', !!apiKey);
 }
+
+// Show warn on load if no key
+if (!apiKey) document.getElementById('key-warn').classList.remove('hidden');
 
 // ── Drag & Drop ───────────────────────────────────────────────────────────
 const drop = document.getElementById('drop-zone');
@@ -347,7 +468,15 @@ async function poll(tid) {
     const t = await res.json();
 
     updateProgress(t.progress, t.label, t.message);
-    updateStages(t.stage);
+    updateStages(t.stage, t.stage_files || {});
+    updateCurrentFile(t.current, t.stage);
+    updateStopButton(t.stage);
+    if (t.stage_files) { lastStageFiles = t.stage_files; }
+    if (t.source_dir)  { lastSourceDir  = t.source_dir; }
+    // Refresh open stage panel live
+    if (openStage && t.stage_files && t.stage_files[openStage]) {
+      renderStagePanel(openStage, t.stage_files[openStage], t.source_dir);
+    }
 
     const newLines = t.logs.slice(lastLogLen);
     newLines.forEach(l => addLog(l));
@@ -357,11 +486,63 @@ async function poll(tid) {
       document.getElementById('no-credits').classList.remove('hidden');
     }
 
-    if (t.stage === 'completed' || t.stage === 'error') {
+    const done = ['completed','error','cancelled'].includes(t.stage);
+    if (done) {
       clearInterval(pollTimer);
+      updateStopButton('done');
+      updateCurrentFile(null, t.stage);
       if (t.files && t.files.length) showResults(t.files);
+      // Show folder path in results
+      if (t.source_dir) {
+        const sec = document.getElementById('results-section');
+        let hint = sec.querySelector('.results-hint');
+        if (!hint) {
+          hint = document.createElement('div');
+          hint.className = 'results-hint';
+          hint.style.cssText = 'font-size:10px;color:var(--muted);margin-bottom:8px;word-break:break-all;';
+          sec.insertBefore(hint, sec.firstChild);
+        }
+        hint.textContent = '📁 ' + t.source_dir + '\\_CourtDefense\\';
+      }
     }
   } catch(e) { /* network hiccup */ }
+}
+
+function updateCurrentFile(cur, stage) {
+  const card = document.getElementById('cur-file-card');
+  if (!cur || stage !== 'transcribing') { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  document.getElementById('cur-filename').textContent = cur.file || '';
+  document.getElementById('cur-idx').textContent      = cur.index || 1;
+  document.getElementById('cur-total').textContent    = cur.total || '?';
+  document.getElementById('cur-device').textContent   = cur.device || '';
+  const pct = cur.total ? Math.round((cur.index - 1) / cur.total * 100) : 0;
+  document.getElementById('cur-file-fill').style.width = pct + '%';
+  if (cur.elapsed) {
+    const s = Math.floor(cur.elapsed), m = Math.floor(s / 60);
+    document.getElementById('cur-elapsed').textContent =
+      m > 0 ? `${m}хв ${s%60}с` : `${s}с`;
+  }
+}
+
+function updateStopButton(stage) {
+  const btn = document.getElementById('btn-stop');
+  const running = ['transcribing','extracting','analyzing','uploaded','pending'].includes(stage);
+  btn.style.display = running ? 'inline-block' : 'none';
+  btn.disabled      = (stage === 'cancelling');
+  btn.textContent   = stage === 'cancelling' ? '⏳ Зупиняється…' : '⏹ Стоп';
+}
+
+async function doStop() {
+  if (!currentTaskId) return;
+  document.getElementById('btn-stop').disabled = true;
+  document.getElementById('btn-stop').textContent = '⏳ Зупиняється…';
+  try {
+    await fetch(`/cancel/${currentTaskId}`, { method: 'POST' });
+    addLog('Запит на зупинку відправлено…', 'dim');
+  } catch(e) {
+    addLog('Помилка запиту зупинки: ' + e, 'err');
+  }
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────
@@ -382,20 +563,70 @@ function updateProgress(pct, label, msg) {
 
 const STAGE_ORDER = ['uploaded','transcribing','extracting','analyzing','completed'];
 
-function updateStages(active) {
-  if (active === 'error') active = 'analyzing';
+function updateStages(active, stageFiles) {
+  const isError     = active === 'error';
+  const isCancelled = active === 'cancelled' || active === 'cancelling';
+  if (isError || isCancelled) active = 'analyzing';
   const idx = STAGE_ORDER.indexOf(active);
   STAGE_ORDER.forEach((s, i) => {
     const el = document.getElementById('st-' + s);
     if (!el) return;
-    el.className = 'stage';
+    // Preserve clickable class for stages that support it
+    const wasClickable = el.classList.contains('clickable');
+    el.className = 'stage' + (wasClickable ? ' clickable' : '');
     if (i < idx) el.classList.add('done');
     else if (i === idx) el.classList.add('active');
   });
-  if (active === 'error') {
+  if (isError || isCancelled) {
     const el = document.getElementById('st-analyzing');
-    if (el) el.classList.add('error');
+    if (el) { el.classList.remove('active'); el.classList.add('error'); }
   }
+}
+
+const STAGE_LABELS = {
+  transcribing: '🎙️ Транскрипції',
+  extracting:   '📄 Документи (витягнутий текст)',
+  analyzing:    '⚖️ Аналіз Claude',
+};
+
+function toggleStageFiles(stage) {
+  const panel = document.getElementById('stage-files-panel');
+  const files = lastStageFiles[stage] || [];
+  if (openStage === stage && !panel.classList.contains('hidden')) {
+    panel.classList.add('hidden');
+    openStage = null;
+    return;
+  }
+  openStage = stage;
+  if (!files.length) {
+    panel.classList.add('hidden');
+    return;
+  }
+  renderStagePanel(stage, files, lastSourceDir);
+  panel.classList.remove('hidden');
+}
+
+function renderStagePanel(stage, files, sourceDir) {
+  document.getElementById('sfp-title').textContent =
+    STAGE_LABELS[stage] || stage;
+  document.getElementById('sfp-source').textContent =
+    sourceDir ? `📁 ${sourceDir}${sourceDir.endsWith('\\') ? '' : '\\'}_CourtDefense` : '';
+  const list = document.getElementById('sfp-list');
+  list.innerHTML = '';
+  files.forEach(f => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;' +
+      'background:var(--bg);border:1px solid var(--border);border-radius:6px;' +
+      'padding:6px 10px;font-size:11px;';
+    const enc = encodeURIComponent(f.path);
+    row.innerHTML =
+      `<a href="/download?path=${enc}" target="_blank"
+          style="color:var(--accent);text-decoration:none;flex:1;
+                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+          title="${f.path}">${f.name}</a>` +
+      `<span style="color:var(--muted);margin-left:10px;white-space:nowrap;">${f.kb} KB</span>`;
+    list.appendChild(row);
+  });
 }
 
 function addLog(line, cls = '') {
@@ -425,6 +656,130 @@ function showResults(files) {
     list.appendChild(div);
   });
   sec.classList.remove('hidden');
+}
+
+// ── Local Folder ──────────────────────────────────────────────────────────
+let folderScanTimer = null;
+
+async function doBrowseFolder() {
+  const zone = document.getElementById('folder-drop-zone');
+  zone.style.borderColor = 'var(--accent)';
+  zone.querySelector('p').textContent = '⏳ Відкриваю вікно вибору…';
+
+  try {
+    const res = await fetch('/pick-folder');
+    const d   = await res.json();
+    zone.style.borderColor = '';
+    zone.querySelector('p').textContent = 'Натисни щоб вибрати папку';
+
+    if (d.path) {
+      document.getElementById('folder-path').value = d.path;
+      scanFolder(d.path);
+    }
+  } catch(e) {
+    zone.style.borderColor = '';
+    zone.querySelector('p').textContent = 'Натисни щоб вибрати папку';
+    document.getElementById('folder-preview').textContent = '❌ Помилка відкриття вікна';
+  }
+}
+
+function onFolderInput() {
+  const path = document.getElementById('folder-path').value.trim();
+  document.getElementById('btn-run-folder').disabled = true;
+  document.getElementById('folder-preview').textContent = '';
+  clearTimeout(folderScanTimer);
+  if (!path) return;
+  folderScanTimer = setTimeout(() => scanFolder(path), 700);
+}
+
+async function scanFolder(path) {
+  const preview = document.getElementById('folder-preview');
+  const check   = document.getElementById('folder-check');
+  const buttons = document.getElementById('folder-buttons');
+  preview.textContent = '⏳ Сканую…';
+  check.classList.add('hidden');
+  buttons.classList.add('hidden');
+
+  try {
+    // Step 1: scan for files
+    const r = await fetch('/scan-folder?folder_path=' + encodeURIComponent(path));
+    if (!r.ok) {
+      const e = await r.json();
+      preview.textContent = '❌ ' + (e.detail || 'Помилка');
+      return;
+    }
+    const d = await r.json();
+    if (d.total === 0) {
+      preview.textContent = '⚠️ Підтримуваних файлів не знайдено';
+      return;
+    }
+    preview.innerHTML =
+      `✓ <b style="color:var(--text)">${d.total} файл(ів)</b>: ` +
+      (d.audio_count ? `🎵 ${d.audio_count} аудіо  ` : '') +
+      (d.docs_count  ? `📄 ${d.docs_count} документів` : '');
+
+    // Step 2: check existing transcripts (only if there are audio files)
+    if (d.audio_count > 0) {
+      preview.textContent += ' — перевіряю транскрипції…';
+      const cr = await fetch('/check-folder?folder_path=' + encodeURIComponent(path));
+      if (cr.ok) {
+        const cd = await cr.json();
+        document.getElementById('check-done').textContent =
+          cd.done_count > 0 ? `✅ ${cd.done_count} вже є транскрипції — пропустимо` : '';
+        document.getElementById('check-todo').textContent =
+          cd.todo_count > 0 ? `🔄 ${cd.todo_count} потребують транскрипції (Whisper)` : '✅ Всі вже транскрибовані';
+        document.getElementById('check-where').textContent =
+          cd.sorted_dir ? `📁 Транскрипції знайдено в: ${cd.sorted_dir}` : '⚠️ Папки Отсортированные не знайдено — всі будуть транскрибовані';
+
+        // Update button labels
+        document.getElementById('btn-run-new').textContent =
+          cd.todo_count > 0 ? `▶ Тільки нові (${cd.todo_count})` : '▶ Запустити';
+        document.getElementById('btn-run-all').textContent =
+          `↺ Переробити всі (${d.audio_count})`;
+        document.getElementById('btn-run-all').style.display =
+          cd.done_count > 0 ? '' : 'none';
+
+        check.classList.remove('hidden');
+      }
+      preview.innerHTML =
+        `✓ <b style="color:var(--text)">${d.total} файл(ів)</b>: ` +
+        (d.audio_count ? `🎵 ${d.audio_count} аудіо  ` : '') +
+        (d.docs_count  ? `📄 ${d.docs_count} документів` : '');
+    }
+
+    buttons.style.display = 'flex';
+    buttons.classList.remove('hidden');
+  } catch(e) {
+    preview.textContent = '❌ Помилка з\'єднання';
+  }
+}
+
+async function doRunFolder(skipExisting = true) {
+  const path = document.getElementById('folder-path').value.trim();
+  if (!path) return;
+
+  const fd = new FormData();
+  fd.append('folder_path', path);
+  fd.append('api_key', apiKey);
+  fd.append('skip_existing', skipExisting ? 'true' : 'false');
+
+  showPipeline();
+  addLog(`📁 Папка: ${path}`, 'hi');
+  addLog(skipExisting ? '⚡ Режим: пропускаємо вже транскрибовані' : '↺ Режим: переробляємо всі файли');
+
+  try {
+    const res = await fetch('/run-folder', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const e = await res.json();
+      addLog('❌ ' + (e.detail || 'Помилка'), 'err');
+      return;
+    }
+    const data = await res.json();
+    addLog(`🎵 ${data.audio_count} аудіо + 📄 ${data.docs_count} документів`);
+    if (data.task_id) startPolling(data.task_id);
+  } catch(e) {
+    addLog('Мережева помилка: ' + e, 'err');
+  }
 }
 
 // ── PDF Converter ─────────────────────────────────────────────────────────

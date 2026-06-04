@@ -279,8 +279,36 @@ class Launcher:
             capture_output=True
         )
 
-        # Install requirements
-        self._log(f"pip install -r requirements.txt (може зайняти 5-15 хв для torch/whisper)…", "dim")
+        # Try CUDA torch first; fall back to CPU if no GPU / download fails
+        self._log("Перевіряю GPU…", "dim")
+        cuda_ok = False
+        try:
+            import subprocess as _sp
+            r = _sp.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                        capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                gpu_name = r.stdout.strip().splitlines()[0]
+                self._log(f"GPU знайдено: {gpu_name} — встановлюю torch+CUDA 12.8…", "ok")
+                r2 = subprocess.run(
+                    [self._pip(), "install", "torch",
+                     "--index-url", "https://download.pytorch.org/whl/cu128",
+                     "--progress-bar", "off"],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding="utf-8", errors="replace",
+                )
+                for line in r2.stdout.splitlines():
+                    if line.strip():
+                        self._log(line, "dim")
+                cuda_ok = (r2.returncode == 0)
+                if cuda_ok:
+                    self._log("✓ torch+CUDA встановлено — транскрипція буде на GPU", "ok")
+                else:
+                    self._log("⚠ CUDA torch не вдалося — буде CPU", "err")
+        except Exception as e:
+            self._log(f"GPU не знайдено або nvidia-smi недоступний: {e}", "dim")
+
+        # Install requirements (torch already installed if cuda_ok)
+        self._log("pip install -r requirements.txt…", "dim")
         proc = subprocess.Popen(
             [self._pip(), "install", "-r", str(REQUIREMENTS),
              "--progress-bar", "off"],
