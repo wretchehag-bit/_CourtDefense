@@ -1,7 +1,20 @@
-# ── Personal case data — NEVER commit ────────────────────────────────────
-case_config.py
+# ══════════════════════════════════════════════════════════════════════════
+#  .gitignore — Court Defense AI
+#  ПРАВИЛО: якщо є сумніви — НЕ комітити.
+# ══════════════════════════════════════════════════════════════════════════
 
-# ── Audio / video / documents (user data) ────────────────────────────────
+# ── КОНФІДЕНЦІЙНІ ДАНІ СПРАВИ ─────────────────────────────────────────────
+# Особисті конфігурації, налаштування, API ключі
+case_config.py
+.env
+.env.*
+*.env
+.launcher_settings.json
+*_credentials.json
+*_secrets.json
+secrets.toml
+
+# ── АУДІО / ВІДЕО / ДОКУМЕНТИ (дані користувача) ─────────────────────────
 *.m4a
 *.mp3
 *.wav
@@ -9,43 +22,66 @@ case_config.py
 *.ogg
 *.wma
 *.aac
+*.opus
 *.pdf
 *.docx
+*.doc
 *.zip
+*.rar
+*.7z
 
-# ── Pipeline output ───────────────────────────────────────────────────────
+# ── ВИХІДНІ ДАНІ ПАЙПЛАЙНУ (згенерований контент справи) ─────────────────
+jobs/
+_CourtDefense/
 ПАКЕТ_ЗАХИСТУ/
 ВІДІБРАНІ_ДОКАЗИ/
 Отсортированные_данные_для_суда/
 СУДОВІ_ДОКУМЕНТИ/
 готовые_нарезки/
-jobs/
+нарізки/
+нарезки/
+data/
 
-# ── Cache / logs ──────────────────────────────────────────────────────────
-.advocate_cache.json
+# ── ЛОГИ (можуть містити шляхи та зміст файлів справи) ───────────────────
+logs/
+*.log
 processed_files.log
+.advocate_cache.json
 _raw_analysis.json
 DEFENSE_ANALYSIS_FULL.txt
 
-# ── Python ────────────────────────────────────────────────────────────────
+# ── ВЕЛИКІ БІНАРНИКИ (не підходять для git) ───────────────────────────────
+ffmpeg/
+build/
+build_tmp/
+*.exe
+
+# ── PYINSTALLER ───────────────────────────────────────────────────────────
+# assets/CourtDefense.spec — це конфіг збірки, він КОМІТУЄТЬСЯ
+dist/
+*.manifest
+
+# ── PYTHON ────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .venv/
 venv/
-.env
 *.egg-info/
+.eggs/
+*.whl
 
-# ── PyInstaller build output ──────────────────────────────────────────────
-dist/
-build_tmp/
-*.spec
+# ── СКРИПТИ З ЗАХАРДКОДЖЕНИМИ ОСОБИСТИМИ ШЛЯХАМИ ─────────────────────────
+# Містять шляхи типу D:\12314234\ — використовуй scripts/ з env CASE_FOLDER
+batch_cut_audio_by_phrases.py
+test_audio_cutter_audit.py
+QUICK_REFERENCE.txt
+BATCH_CUTTER_GUIDE.md
+AUDIT_INSTRUCTIONS.md
+REFACTORING_COMPLETE.md
 
-# ── Launcher saved settings (contains API key) ───────────────────────────
-.launcher_settings.json
-
-# ── Android build artifacts ───────────────────────────────────────────────
+# ── ANDROID BUILD ARTIFACTS ──────────────────────────────────────────────
 android/.gradle/
 android/build/
 android/app/build/
@@ -59,13 +95,13 @@ android_standalone/local.properties
 *.keystore
 *.jks
 
-# ── Claude Code ───────────────────────────────────────────────────────────
+# ── CLAUDE CODE / IDE / OS ────────────────────────────────────────────────
 .claude/
-
-# ── IDE ───────────────────────────────────────────────────────────────────
+.clineignore
 .vscode/
 .idea/
 *.swp
 *.iml
 .DS_Store
 Thumbs.db
+desktop.ini

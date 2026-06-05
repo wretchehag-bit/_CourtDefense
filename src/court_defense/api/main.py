@@ -1,6 +1,7 @@
-"""
-FastAPI веб-оркестратор
-Запуск: python start_app.py  →  http://localhost:8000
+"""FastAPI web orchestrator.
+
+REST endpoints for audio transcription, PDF extraction, case analysis.
+Run: python start_app.py  →  http://localhost:8000
 """
 import os
 from pathlib import Path
@@ -8,7 +9,8 @@ from typing import List
 from fastapi import FastAPI, BackgroundTasks, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
-from . import services
+
+from ..core import services
 
 WEBAPP_DIR = Path(__file__).parent
 

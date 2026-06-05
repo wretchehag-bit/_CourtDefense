@@ -1,0 +1,121 @@
+[tool.poetry]
+name = "court-defense-ai"
+version = "2.1.1"
+description = "Система автоматизації доказів для адвокатів. Автоматична видобудь критичних фрагментів з судових записів за часовими мітками."
+authors = ["Court Defense AI Team <wretchehag@gmail.com>"]
+license = "Proprietary"
+readme = "README.md"
+packages = [
+    { include = "court_defense", from = "src" }
+]
+
+# Python версія
+python = "^3.11"
+
+[tool.poetry.dependencies]
+# Core web framework
+fastapi = "^0.109.0"
+uvicorn = { version = "^0.27.0", extras = ["standard"] }
+python-multipart = "^0.0.6"
+pywebview = "^5.0"
+
+# AI and transcription
+anthropic = "^0.105.0"
+faster-whisper = "^0.10.0"
+torch = { version = "^2.2.0", optional = true }
+
+# PDF processing
+pdfplumber = "^0.10.0"
+pypdf = "^4.0.0"
+python-docx = "^0.8.11"
+reportlab = "^4.0.0"
+
+# HTTP client
+httpx = "^0.25.0"
+
+# Audio/Video processing
+imageio-ffmpeg = "^0.4.9"
+
+# Streaming
+streamlit = "^1.28.0"
+
+# Testing
+pytest = "^7.4.0"
+pytest-asyncio = "^0.23.0"
+
+[tool.poetry.extras]
+# Опціональні залежності для GPU підтримки
+# Встановити: poetry install --extras gpu
+gpu = ["torch"]
+
+[tool.poetry.dev-dependencies]
+# Розробка
+black = "^23.12.0"
+isort = "^5.13.0"
+flake8 = "^6.1.0"
+mypy = "^1.7.0"
+pytest-cov = "^4.1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+# Можна додати CLI команди, наприклад:
+# court-defense-ai = "launcher:main"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | \.eggs
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_gitignore = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/court_defense", "tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true

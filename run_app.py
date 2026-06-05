@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""
-Court Defense AI — Native Desktop Application Entry Point
-Запуск: python run_app.py → pywebview окно + FastAPI backend на порту 8000
+# -*- coding: utf-8 -*-
+"""Court Defense AI — Native Desktop Application Entry Point.
+
+Run: python run_app.py → pywebview window + FastAPI backend on port 8000
 """
 import threading
 import time
 import sys
 import signal
 from pathlib import Path
+
+# Add src/ to path for court_defense imports
+sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import webview
 
@@ -24,14 +28,14 @@ def start_backend_server():
     print("[Backend] Starting FastAPI on http://127.0.0.1:8000...")
     try:
         uvicorn_run(
-            "webapp.main:app",
+            "court_defense.api.main:app",
             host="127.0.0.1",
             port=8000,
             log_level="info",
             access_log=True,
         )
     except Exception as e:
-        print(f"[Backend] Error: {e}", file=sys.stderr)
+        print(f"[Backend] Error: {e}")
 
 
 def verify_server_ready(timeout: int = 30) -> bool:
@@ -83,17 +87,17 @@ def main():
 
     # ── Wait for server to be ready ────────────────────────────────────────────
     if not verify_server_ready(timeout=30):
-        print("[Error] Backend failed to initialize. Exiting.", file=sys.stderr)
+        print("[Error] Backend failed to initialize. Exiting.")
         sys.exit(1)
 
     # ── Create and show pywebview window ───────────────────────────────────────
     print("[UI] Creating pywebview window...")
     window = webview.create_window(
-        title="Court Defense AI — Система защиты в суде",
+        title="Court Defense AI - Defense Strategy System",
         url="http://127.0.0.1:8000",
         width=1200,
         height=800,
-        text_select=True,  # CRITICAL: Allow advocates to select & copy text from reports
+        text_select=True,
     )
 
     # ── Handle window close event ──────────────────────────────────────────────

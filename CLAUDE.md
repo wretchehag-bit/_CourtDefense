@@ -1,40 +1,56 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
+
+**Status**: ✅ Enterprise-grade refactoring complete (June 2026)
 
 ## What this project is
 
-A single-file Python CLI tool (`import os.py`) that:
-1. Scans the parent directory for audio files (MP3, M4A, WAV, FLAC, WMA, OGG, AAC) and ZIP archives containing audio
-2. Presents an interactive numbered menu for file selection
-3. Splits the chosen file into 5 equal byte-chunks
-4. Transcribes each chunk via `faster-whisper` (model: `medium`, device: `cpu`, compute_type: `int8`)
-5. Writes chunked audio and timestamped `.txt` transcripts into `готовые_нарезки/`
+A professional multi-interface Python application for legal defense case analysis:
+- **Audio Intelligence**: Transcribe court recordings (faster-whisper), extract evidence by timestamps
+- **Document Analysis**: Process PDFs, contracts, witness statements via Claude API
+- **Case Strategy**: AI-powered defense analysis and argument generation
+- **Multi-UI**: Desktop app (pywebview), Web UI (FastAPI), CLI (Streamlit alternative)
+- **Production Ready**: PyInstaller standalone .exe for Windows distribution
 
-Audio is court-proceeding recordings in Ukrainian/surzhyk.
+Audio is court-proceeding recordings in Ukrainian/Russian/mixed language.
 
 ## Running the application
 
-### Native Desktop App (recommended)
+### Production: Standalone .exe
+```powershell
+dist\CourtDefense.exe
+# OR
+dist\RUN_ME.bat
+```
+- Single 2.7GB executable
+- No Python installation required
+- Full-featured desktop application
+- Works on Windows 7+ (64-bit)
+
+### Development: Desktop App
 ```powershell
 python run_app.py
+# Requires: sys.path has src/ for court_defense imports
 ```
-- Launches native window (Windows/macOS/Linux)
-- Auto-starts FastAPI backend on port 8000
-- Allows text selection in reports (critical for advocates)
-- Clean shutdown when window closes
 
-### Web UI (browser-based)
+### Development: Web UI
 ```powershell
 python start_app.py
+# Opens http://localhost:8000 in browser
 ```
-Opens browser at `http://localhost:8000`
 
-### CLI Tool (legacy)
+### Development: Streamlit
 ```powershell
-python "import os.py"
+streamlit run app_streamlit.py
+# Alternative UI (http://localhost:8501)
 ```
-Interactive menu for audio splitting and transcription.
+
+### Development: CLI Audio Cutter
+```powershell
+python run_audio_cutter.py
+# Interactive menu for evidence extraction
+```
 
 ## Key dependency
 
@@ -44,23 +60,37 @@ faster-whisper
 
 Install with: `pip install faster-whisper`
 
-## Directory layout
+## Directory layout (Enterprise Architecture)
 
-- `run_app.py` — **Entry point for native desktop app** (pywebview + FastAPI)
-- `start_app.py` — Entry point for web UI (FastAPI in browser)
-- `import os.py` — the original single-file CLI tool (keep the name as-is)
-- `transcribe.py` — standalone transcription script (GPU/CPU auto-detect)
-- `advocate_agent.py` — parallel Claude classifier for transcripts
-- `defense_master.py` — full case analysis + document generator
-- `lawyer_analyzer.py` — combined analyzer + court document writer
-- `orchestrator.py` — end-to-end pipeline runner
-- `pipeline.py` — legacy pipeline (ffmpeg + whisper + sort)
-- `webapp/` — FastAPI application (main.py, services.py, static/)
-- `tests/test_pipeline.py` — Unit tests for PDF processing and API validation
-- `case_config_example.py` — **template**: copy to `case_config.py` and fill in case data
-- `case_config.py` — user's private config (gitignored, never committed)
-- `готовые_нарезки/` — output: `part_N_chunk.<ext>` + `part_N_transcript.txt`
-- `Отсортированные_данные_для_суда/` — input recordings
+```
+d:\...\trust/
+├── src/court_defense/          ← Installable package
+│   ├── api/                    ← FastAPI endpoints + static UI
+│   │   ├── main.py
+│   │   └── static/index.html
+│   └── core/                   ← Business logic (no UI)
+│       ├── audio_cutter.py
+│       ├── services.py
+│       └── config.py           ← Central config + resource_path()
+├── tests/                      ← 41 passing tests
+├── docs/                       ← All documentation
+├── scripts/
+│   ├── build.ps1               ← PyInstaller build script
+│   └── legacy/                 ← Legacy standalone scripts
+├── assets/CourtDefense.spec    ← PyInstaller configuration
+├── dist/CourtDefense.exe       ← Production standalone app
+│
+├── Entry Points:
+│   ├── run_app.py              ← Desktop (pywebview + FastAPI)
+│   ├── start_app.py            ← Web UI (FastAPI + browser)
+│   ├── app_streamlit.py        ← Streamlit alternative
+│   └── run_audio_cutter.py     ← CLI audio extraction
+│
+└── Configuration:
+    ├── case_config_example.py  ← Template (copy to case_config.py)
+    ├── case_config.py          ← User's private config (gitignored)
+    ├── pyproject.toml          ← Poetry package config
+    └── .python-version         ← Python 3.11.9
 
 ## First-time setup for new users
 

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""
-CLI точка входу для автоматичної нарізки аудіо за ключовими фразами.
-Запуск: python run_audio_cutter.py
+# -*- coding: utf-8 -*-
+"""CLI для автоматичної нарізки аудіо за ключовими фразами.
+
+Run: python run_audio_cutter.py
 """
 import sys
 import os
 from pathlib import Path
 
-# Додаємо корінь проекту до path
-current_dir = Path(__file__).parent.resolve()
-sys.path.insert(0, str(current_dir))
+# Add src/ to path for court_defense imports
+sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from webapp.audio_cutter import cut_audio_by_phrases
+from court_defense.core.audio_cutter import cut_audio_by_phrases
+
+# Project root for resolving relative paths to phrase files
+current_dir = Path(__file__).parent.resolve()
 
 
 def main():

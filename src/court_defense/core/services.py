@@ -1,17 +1,24 @@
-"""
-Service layer — per-job isolated pipeline.
+"""Service layer — per-job isolated pipeline.
+
 Each task gets its own jobs/{tid}/ directory. No shared state between users.
+Provides: transcription, PDF OCR, document extraction, classification, analysis.
 """
-import os, sys, re, uuid, time
+import os
+import re
+import uuid
+import time
+import json
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Dict, List, Optional, Tuple
 
-SCRIPT_DIR = Path(__file__).parent.parent
-JOBS_DIR   = SCRIPT_DIR / "jobs"
+from . import config
 
-AUDIO_EXTS = {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".aac", ".wma"}
-DOC_EXTS   = {".pdf", ".docx", ".txt"}
+SCRIPT_DIR = config.PROJECT_ROOT
+JOBS_DIR   = config.JOBS_DIR
+
+AUDIO_EXTS = config.AUDIO_EXTENSIONS
+DOC_EXTS   = config.DOC_EXTENSIONS
 
 # ── Task storage ──────────────────────────────────────────────────────────
 _tasks:   Dict[str, dict] = {}

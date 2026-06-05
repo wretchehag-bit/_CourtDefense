@@ -6,12 +6,8 @@ import os
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
-import sys
 
-# Add parent to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from webapp import services
+from court_defense.core import services
 
 
 # ── Test fixtures ──────────────────────────────────────────────────────

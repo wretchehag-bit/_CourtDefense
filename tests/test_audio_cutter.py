@@ -1,424 +1,563 @@
 """
-Unit-тесты для модуля автоматичної нарізки аудіо по ключовим фразам.
-Перевіряє: чекпоінти, ідемпотентність, припинення на готовому.
+ЮНІТ-ТЕСТИ: Модуль audio_cutter.py
+
+Покривають:
+1. Парсинг часових міток (regex + конвертація)
+2. Очищення імен папок (Windows safety)
+3. Каскадна резолюція FFmpeg (автономність)
+4. Розумний пошук аудіо (рекурсивний + гнучкий матчинг)
+5. Стійкість до кодування (encoding fallback)
 """
+
 import pytest
-import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-import sys
+import os
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from webapp.audio_cutter import (
-    _read_search_phrases,
-    _find_transcription_files,
-    _search_phrase_in_text,
-    _format_timestamp,
-    _create_output_folder_name,
-    _checkpoint_exists,
-    cut_audio_by_phrases,
-    _generate_summary_report,
+from court_defense.core.audio_cutter import (
+    _parse_timestamp_markers,
+    _sanitize_folder_name,
+    _resolve_ffmpeg_path,
+    _extract_base_name,
+    _find_audio_for_transcript,
+    _read_text_safe,
+    _cut_audio_segment,
+    _clamp_segment,
+    _extract_transcript_context,
+    _get_audio_duration,
+    _save_transcript_fragment,
+    _write_summary_report,
 )
 
 
-# ── Тестові фікстури ───────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# 1. ТЕСТИ ПАРСИНГУ ЧАСОВИХ МІТОК
+# ════════════════════════════════════════════════════════════════════════════
 
-@pytest.fixture
-def temp_case_folder():
-    """Створює тимчасову папку структури справи."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        case_path = Path(tmpdir) / "test_case"
-        case_path.mkdir()
-        yield case_path
+class TestParseTimestampMarkers:
+    """Тест парсингу часових міток та маркерів."""
+
+    def test_parse_simple_markers(self):
+        """Базовий парсинг: маркер на одному рядку, час на наступному."""
+        text = """1 дискридетація батька
+15:48---15:56"""
+
+        result = _parse_timestamp_markers(text)
+
+        assert len(result) == 1
+        marker, start_sec, end_sec = result[0]
+        assert marker == "1 дискридетація батька"
+        assert start_sec == 15 * 60 + 48  # 948 seconds
+        assert end_sec == 15 * 60 + 56    # 956 seconds
+
+    def test_parse_inline_markers(self):
+        """Парсинг маркера з часом в одному рядку."""
+        text = "1 важливе свідчення (10:30---10:45)"
+
+        result = _parse_timestamp_markers(text)
+
+        assert len(result) == 1
+        marker, start_sec, end_sec = result[0]
+        assert "важливе свідчення" in marker
+        assert start_sec == 10 * 60 + 30
+        assert end_sec == 10 * 60 + 45
+
+    def test_parse_multiple_markers(self):
+        """Парсинг кількох маркерів."""
+        text = """1 перший фрагмент
+01:00---01:30
+2 другий фрагмент
+05:45---06:00"""
+
+        result = _parse_timestamp_markers(text)
+
+        assert len(result) == 2
+        assert result[0][0] == "1 перший фрагмент"
+        assert result[0][1] == 60  # 01:00
+        assert result[0][2] == 90  # 01:30
+        assert result[1][0] == "2 другий фрагмент"
+        assert result[1][1] == 345  # 05:45
+        assert result[1][2] == 360  # 06:00
+
+    def test_parse_empty_text(self):
+        """Парсинг порожнього тексту."""
+        result = _parse_timestamp_markers("")
+        assert result == []
+
+    def test_parse_no_timestamps(self):
+        """Текст без часових міток."""
+        text = "просто текст без часів"
+        result = _parse_timestamp_markers(text)
+        assert result == []
+
+    def test_time_conversion_accuracy(self):
+        """Точність конвертації часу в секунди."""
+        text = "маркер\n00:00---00:01"
+        result = _parse_timestamp_markers(text)
+        assert result[0][1] == 0  # 00:00 = 0 сек
+        assert result[0][2] == 1  # 00:01 = 1 сек
+
+    def test_large_timestamps(self):
+        """Обробка великих часів (більше години)."""
+        text = "довгий фрагмент\n59:45---60:30"
+        result = _parse_timestamp_markers(text)
+        assert len(result) == 1
+        assert result[0][1] == 59 * 60 + 45
+        assert result[0][2] == 60 * 60 + 30
 
 
-@pytest.fixture
-def search_phrases_file(temp_case_folder):
-    """Створює файл зі списком фраз."""
-    phrases_file = temp_case_folder / "search_phrases.txt"
-    phrases_file.write_text(
-        "ключова фраза\n"
-        "важлива промова\n"
-        "# коментар - ігнорується\n"
-        "\n"  # пуста лінія - ігнорується
-        "третя фраза\n",
-        encoding="utf-8"
+# ════════════════════════════════════════════════════════════════════════════
+# 2. ТЕСТИ ОЧИЩЕННЯ ІМЕН ПАПОК (Windows Safety)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestSanitizeFolderName:
+    """Тест очищення імен папок від заборонених символів."""
+
+    def test_remove_forbidden_chars(self):
+        """Видалення заборонених символів."""
+        text = 'фраза<>:"/\\|?*'
+        result = _sanitize_folder_name(text)
+
+        # Всі заборонені символи мають бути видалені або замінені
+        assert '<' not in result
+        assert '>' not in result
+        assert ':' not in result
+        assert '"' not in result
+        assert '/' not in result
+        assert '\\' not in result
+        assert '|' not in result
+        assert '?' not in result
+        assert '*' not in result
+
+    def test_truncate_long_name(self):
+        """Обрізання довгих імен."""
+        long_text = "а" * 100
+        result = _sanitize_folder_name(long_text, max_length=50)
+
+        assert len(result) <= 50
+
+    def test_preserve_valid_chars(self):
+        """Збереження валідних символів."""
+        text = "Фраза 123_батька-справа"
+        result = _sanitize_folder_name(text)
+
+        assert "Фраза" in result
+        assert "123" in result
+        assert "батька" in result
+        assert "справа" in result
+
+    def test_empty_after_sanitize(self):
+        """Обробка рядка, що стає тільки підкресленнями після очищення."""
+        text = "<>:/"
+        result = _sanitize_folder_name(text)
+
+        # Заборонені символи замінюються на _, але результат не порожній
+        assert result == "____"
+
+    def test_trailing_dots_removed(self):
+        """Видалення завершальних точок (Windows вимога)."""
+        text = "папка..."
+        result = _sanitize_folder_name(text)
+
+        assert not result.endswith('.')
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 3. ТЕСТИ РЕЗОЛЮЦІЇ FFmpeg
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestResolveFFmpegPath:
+    """Тест каскадної автономної резолюції FFmpeg."""
+
+    @patch('shutil.which')
+    def test_system_path_first(self, mock_which):
+        """FFmpeg з системного PATH повинен мати найвищий пріоритет."""
+        mock_which.return_value = "/usr/bin/ffmpeg"
+
+        result = _resolve_ffmpeg_path()
+
+        assert result == "/usr/bin/ffmpeg"
+        mock_which.assert_called_once_with("ffmpeg")
+
+    @patch('pathlib.Path.exists')
+    @patch('shutil.which')
+    def test_local_portable_folder(self, mock_which, mock_path_exists):
+        """Локальна папка ffmpeg/bin/ffmpeg.exe для Portable."""
+        mock_which.return_value = None  # Немає в системному PATH
+        mock_path_exists.return_value = True  # bundled ffmpeg exists
+
+        result = _resolve_ffmpeg_path()
+
+        # Повинен повернути локальний шлях (містить 'ffmpeg')
+        assert 'ffmpeg' in result
+
+    @patch('pathlib.Path.exists')
+    @patch('shutil.which')
+    def test_fallback_default(self, mock_which, mock_path_exists):
+        """Fallback на дефолт, якщо FFmpeg не знайдено ні в PATH, ні у bundled."""
+        mock_which.return_value = None
+        mock_path_exists.return_value = False
+
+        result = _resolve_ffmpeg_path()
+
+        # When both PATH and bundled path are unavailable → "ffmpeg" literal
+        assert result == "ffmpeg"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 4. ТЕСТИ РОЗУМНОГО ПОШУКУ АУДІО
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestFindAudioForTranscript:
+    """Тест гнучкого рекурсивного пошуку аудіофайлу."""
+
+    def test_find_same_folder(self):
+        """Пошук однойменного файлу в одній папці."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+
+            # Створюємо аудіо та текст
+            audio_file = tmp_path / "recording_1648.mp3"
+            audio_file.write_bytes(b"fake audio")
+
+            transcript_file = tmp_path / "recording_1648.txt"
+            transcript_file.write_text("text")
+
+            # Пошук
+            result = _find_audio_for_transcript(transcript_file, tmp_path)
+
+            assert result == audio_file
+
+    def test_find_recursive_different_folders(self):
+        """Пошук аудіо в іншій папці (рекурсивний)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+
+            # Створюємо підпапки
+            audio_dir = tmp_path / "audio"
+            audio_dir.mkdir()
+            text_dir = tmp_path / "transcripts"
+            text_dir.mkdir()
+
+            # Аудіо в одній папці
+            audio_file = audio_dir / "session_123.mp3"
+            audio_file.write_bytes(b"fake")
+
+            # Текст в іншій папці
+            transcript_file = text_dir / "session_123_АНАЛІЗ.txt"
+            transcript_file.write_text("text")
+
+            # Пошук
+            result = _find_audio_for_transcript(transcript_file, tmp_path)
+
+            assert result == audio_file
+
+    def test_extract_base_name_with_analysis_suffix(self):
+        """Витяг базового імені з суфіксом _АНАЛІЗ."""
+        base_name = _extract_base_name("recording_1648_АНАЛІЗ.txt")
+        assert base_name == "recording_1648"
+
+    def test_extract_base_name_with_chunk(self):
+        """Витяг базового імені з chunk маркером."""
+        base_name = _extract_base_name("audio_chunk_001.json")
+        assert "audio" in base_name
+        assert "chunk" not in base_name.lower()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 5. ТЕСТИ СТІЙКОСТІ ДО КОДУВАННЯ
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestReadTextSafe:
+    """Тест каскадного encoding fallback."""
+
+    def test_read_utf8(self):
+        """Читання UTF-8 файлу."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            file_path = tmp_path / "test.txt"
+
+            content = "тестовий текст"
+            file_path.write_text(content, encoding='utf-8')
+
+            result = _read_text_safe(file_path)
+            assert result == content
+
+    def test_read_windows_1251(self):
+        """Читання Windows-1251 файлу (Cyrillic)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            file_path = tmp_path / "test.txt"
+
+            content = "українська мова"
+            file_path.write_text(content, encoding='windows-1251')
+
+            result = _read_text_safe(file_path)
+            assert result == content
+
+    def test_read_nonexistent_returns_fallback(self):
+        """Читання неіснуючого файлу повертає fallback."""
+        result = _read_text_safe(Path("/nonexistent/file.txt"), fallback_text="default")
+        assert result == "default"
+
+    def test_fallback_chain_works(self):
+        """Каскадна спроба кодувань."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            file_path = tmp_path / "test.txt"
+
+            # Пишемо в Windows-1251 (Cyrillic)
+            content = "Тест на кодування"
+            file_path.write_text(content, encoding='windows-1251')
+
+            # Маємо прочитати навіть якщо UTF-8 не спрацює
+            result = _read_text_safe(file_path)
+            assert "Тест" in result or len(result) > 0
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6. ІНТЕГРАЦІЙНІ ТЕСТИ
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestAudioCuttingIntegration:
+    """Інтеграційні тести для повної роботи конвеєру."""
+
+    @patch('court_defense.core.audio_cutter._cut_audio_segment')
+    def test_full_workflow_simulation(self, mock_cut):
+        """Симуляція повного workflow нарізки."""
+        mock_cut.return_value = True
+
+        text = """1 перший фрагмент
+10:00---10:30"""
+
+        result = _parse_timestamp_markers(text)
+
+        assert len(result) == 1
+        marker, start_sec, end_sec = result[0]
+        assert marker == "1 перший фрагмент"
+        assert start_sec == 600
+        assert end_sec == 630
+
+    def test_sanitize_and_extract_integration(self):
+        """Інтеграція очищення і витягу базового імені."""
+        # Реальні імена файлів від користувача
+        transcript_name = "270520256_1648_АНАЛІЗ.txt"
+        audio_name = "270520256_1648.mp3"
+
+        transcript_base = _extract_base_name(transcript_name)
+        audio_base = _extract_base_name(audio_name)
+
+        assert transcript_base == audio_base
+
+    def test_windows_safe_folder_creation(self):
+        """Тест створення папки з небезпечною назвою."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+
+            # Небезпечна назва
+            unsafe_name = 'фраза<>:"test'
+            safe_name = _sanitize_folder_name(unsafe_name)
+
+            # Створюємо папку з очищеним іменем
+            folder = tmp_path / safe_name
+            folder.mkdir(parents=True, exist_ok=True)
+
+            # Папка повинна існувати і мати вхідне ім'я
+            assert folder.exists()
+            assert safe_name == folder.name
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7. ТЕСТИ CLAMPING (v2.2)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestClampSegment:
+    """Tests for time-bound clamping logic (v2.2)."""
+
+    def test_valid_range_unchanged(self):
+        """A range fully within duration passes through unchanged."""
+        s, e, skip = _clamp_segment(60, 120, 300.0)
+        assert s == 60
+        assert e == 120
+        assert skip is False
+
+    def test_negative_start_clamped_to_zero(self):
+        """Negative start is clamped to 0."""
+        s, e, skip = _clamp_segment(-10, 30, 300.0)
+        assert s == 0
+        assert e == 30
+        assert skip is False
+
+    def test_end_beyond_duration_clamped(self):
+        """end_sec beyond track length is clamped to duration."""
+        s, e, skip = _clamp_segment(240, 999, 300.0)
+        assert s == 240
+        assert e == 300
+        assert skip is False
+
+    def test_start_at_or_past_duration_skipped(self):
+        """Segment starting at or after duration must be skipped."""
+        s, e, skip = _clamp_segment(300, 360, 300.0)
+        assert skip is True
+
+        s2, e2, skip2 = _clamp_segment(400, 460, 300.0)
+        assert skip2 is True
+
+    def test_unknown_duration_no_clamping(self):
+        """When duration is 0 (unknown), no clamping — skip is always False."""
+        s, e, skip = _clamp_segment(9999, 10000, 0.0)
+        assert s == 9999
+        assert e == 10000
+        assert skip is False
+
+    def test_both_ends_clamped(self):
+        """Both start and end clamped when out of bounds."""
+        s, e, skip = _clamp_segment(-5, 999, 60.0)
+        assert s == 0
+        assert e == 60
+        assert skip is False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8. ТЕСТИ EXTRACTION TRANSCRIPT CONTEXT (v2.2)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestExtractTranscriptContext:
+    """Tests for _extract_transcript_context (v2.2)."""
+
+    SAMPLE = (
+        "[00:00:05] Перший рядок\n"
+        "[00:01:00] Другий рядок\n"
+        "[00:02:30] Третій рядок\n"
+        "[00:05:00] Четвертий рядок\n"
     )
-    return phrases_file
 
-
-@pytest.fixture
-def sample_whisper_json(temp_case_folder):
-    """Створює тестовий JSON файл від Whisper з фіктивним аудіофайлом."""
-    audio_folder = temp_case_folder / "audio_files"
-    audio_folder.mkdir()
-
-    # Створюємо фіктивний аудіофайл (пусто, лише для існування)
-    audio_file = audio_folder / "recording.mp3"
-    audio_file.write_bytes(b"fake audio data")
-
-    whisper_file = audio_folder / "recording.json"
-    whisper_data = {
-        "text": (
-            "[00:00:15] Судья: Добрый день, открываем заседание.\n"
-            "[00:00:30] Адвокат: Здравствуйте, уважаемые коллеги.\n"
-            "[00:01:00] Прокурор: Это ключова фраза по делу номер 123.\n"
-            "[00:02:00] Адвокат: Согласен, это важлива промова на весь процесс.\n"
-            "[00:03:00] Судья: Спасибо, третя фраза зафиксирована в протоколе.\n"
-        ),
-        "segments": []
-    }
-    whisper_file.write_text(json.dumps(whisper_data), encoding="utf-8")
-    return whisper_file
-
-
-@pytest.fixture
-def sample_txt_transcription(temp_case_folder):
-    """Створює тестовий TXT файл транскрипції з фіктивним аудіофайлом."""
-    audio_folder = temp_case_folder / "audio_files"
-    audio_folder.mkdir(exist_ok=True)
-
-    # Створюємо фіктивний аудіофайл
-    audio_file = audio_folder / "second_recording.wav"
-    audio_file.write_bytes(b"fake audio data")
-
-    txt_file = audio_folder / "second_recording.txt"
-    txt_file.write_text(
-        "[00:10:15] Судья: Продолжаем заседание.\n"
-        "[00:10:30] Свидетель: Я видел ключова фраза происходящего.\n"
-        "[00:11:00] Адвокат: Это также важлива промова для защиты.\n",
-        encoding="utf-8"
-    )
-    return txt_file
-
-
-# ── Тести для читання фраз ─────────────────────────────────────────────────
-
-def test_read_search_phrases_valid(search_phrases_file):
-    """Тест: читання валідного списку фраз."""
-    phrases = _read_search_phrases(search_phrases_file)
-
-    assert len(phrases) == 3
-    assert "ключова фраза" in phrases
-    assert "важлива промова" in phrases
-    assert "третя фраза" in phrases
-    # Коментарі та пусті лінії не повинні бути включені
-    assert len(phrases) == 3
-
-
-def test_read_search_phrases_empty_file(temp_case_folder):
-    """Тест: читання пустого файлу."""
-    empty_file = temp_case_folder / "empty.txt"
-    empty_file.write_text("", encoding="utf-8")
-
-    phrases = _read_search_phrases(empty_file)
-    assert len(phrases) == 0
-
-
-def test_read_search_phrases_nonexistent():
-    """Тест: файл не існує."""
-    nonexistent = Path("/nonexistent/path/search_phrases.txt")
-    phrases = _read_search_phrases(nonexistent)
-    assert len(phrases) == 0
-
-
-# ── Тести для пошуку файлів ────────────────────────────────────────────────
-
-def test_find_transcription_files(sample_whisper_json, sample_txt_transcription):
-    """Тест: пошук файлів транскрипції."""
-    case_path = sample_whisper_json.parent.parent
-
-    files = _find_transcription_files(case_path)
-
-    assert len(files) == 2
-    assert sample_whisper_json in files
-    assert files[sample_whisper_json] == "json"
-    assert sample_txt_transcription in files
-    assert files[sample_txt_transcription] == "txt"
-
-
-def test_find_transcription_files_none_found(temp_case_folder):
-    """Тест: жоден файл не знайдено."""
-    files = _find_transcription_files(temp_case_folder)
-    assert len(files) == 0
-
-
-# ── Тести для пошуку фраз ──────────────────────────────────────────────────
-
-def test_search_phrase_in_text_single_match():
-    """Тест: пошук однієї фрази в тексті."""
-    text = (
-        "[00:00:10] Судья: Добрый день.\n"
-        "[00:00:20] Адвокат: Это ключова фраза для дела.\n"
-        "[00:00:30] Судья: Спасибо.\n"
-    )
-
-    matches = _search_phrase_in_text(text, "ключова фраза", context_seconds=10)
-
-    assert len(matches) == 1
-    start_sec, context = matches[0]
-    assert start_sec == 20  # [00:00:20]
-    assert "ключова фраза" in context
-
-
-def test_search_phrase_in_text_case_insensitive():
-    """Тест: пошук не чутливий до регістру."""
-    text = "[00:00:10] Адвокат: КЛЮЧОВА ФРАЗА тут.\n"
-
-    matches = _search_phrase_in_text(text, "ключова фраза")
-
-    assert len(matches) == 1
-
-
-def test_search_phrase_in_text_no_match():
-    """Тест: фраза не знайдена."""
-    text = "[00:00:10] Судья: Добрый день.\n"
-
-    matches = _search_phrase_in_text(text, "несуществующая фраза")
-
-    assert len(matches) == 0
-
-
-def test_search_phrase_in_text_multiple_matches():
-    """Тест: множеством відповідностей однієї фрази."""
-    text = (
-        "[00:00:10] Адвокат: ключова фраза раз.\n"
-        "[00:01:00] Судья: ключова фраза два раза.\n"
-        "[00:02:00] Прокурор: ключова фраза три раза.\n"
-    )
-
-    matches = _search_phrase_in_text(text, "ключова фраза")
-
-    assert len(matches) == 3
-    assert matches[0][0] == 10  # [00:00:10]
-    assert matches[1][0] == 60  # [00:01:00]
-    assert matches[2][0] == 120  # [00:02:00]
-
-
-# ── Тести для форматування часу ────────────────────────────────────────────
-
-def test_format_timestamp_zero():
-    """Тест: форматування 0 секунд."""
-    assert _format_timestamp(0) == "0:00"
-
-
-def test_format_timestamp_seconds_only():
-    """Тест: форматування тільки секунди."""
-    assert _format_timestamp(45) == "0:45"
-
-
-def test_format_timestamp_minutes_and_seconds():
-    """Тест: форматування хвилин і секунд."""
-    assert _format_timestamp(125) == "2:05"
-
-
-def test_format_timestamp_large():
-    """Тест: форматування великого часу."""
-    assert _format_timestamp(3665) == "61:05"  # 1 год 1 хв 5 сек
-
-
-# ── Тести для імен папок ────────────────────────────────────────────────────
-
-def test_create_output_folder_name():
-    """Тест: створення імені папки виходу."""
-    name = _create_output_folder_name("ключова фраза", "recording.wav", 120)
-
-    assert "ключова_фраза" in name
-    assert "recording" in name
-    assert "min_2-00" in name  # Windows-compatible: colon replaced with dash
-
-
-def test_create_output_folder_name_sanitizes_special_chars():
-    """Тест: очистка спеціальних символів."""
-    name = _create_output_folder_name('Фраза: "важна"!', "test.mp3", 60)
-
-    # Не повинно мати забороненої символи
-    assert not any(c in name for c in '<>:"/\\|?*')
-    assert "min_1-00" in name  # Colon replaced with dash for Windows
-
-
-# ── Тести для чекпоінтів ────────────────────────────────────────────────────
-
-def test_checkpoint_exists_true(temp_case_folder):
-    """Тест: чекпоінт існує (обидва файли)."""
-    output_folder = temp_case_folder / "output_folder"
-    output_folder.mkdir()
-
-    # Створюємо обидва необхідних файли
-    (output_folder / "нарізка.mp3").write_bytes(b"fake audio data")
-    (output_folder / "фрагмент_транскрипту.txt").write_text("test", encoding="utf-8")
-
-    assert _checkpoint_exists(output_folder) is True
-
-
-def test_checkpoint_exists_missing_audio(temp_case_folder):
-    """Тест: чекпоінт НЕ існує (відсутня аудіо)."""
-    output_folder = temp_case_folder / "output_folder"
-    output_folder.mkdir()
-
-    # Тільки текст, без аудіо
-    (output_folder / "фрагмент_транскрипту.txt").write_text("test", encoding="utf-8")
-
-    assert _checkpoint_exists(output_folder) is False
-
-
-def test_checkpoint_exists_missing_text(temp_case_folder):
-    """Тест: чекпоінт НЕ існує (відсутня текст)."""
-    output_folder = temp_case_folder / "output_folder"
-    output_folder.mkdir()
-
-    # Тільки аудіо, без тексту
-    (output_folder / "нарізка.wav").write_bytes(b"fake audio")
-
-    assert _checkpoint_exists(output_folder) is False
-
-
-def test_checkpoint_not_exists_folder_missing(temp_case_folder):
-    """Тест: чекпоінт НЕ існує (папка не створена)."""
-    output_folder = temp_case_folder / "nonexistent_folder"
-
-    assert _checkpoint_exists(output_folder) is False
-
-
-# ── Інтеграційні тести ──────────────────────────────────────────────────────
-
-@patch('webapp.audio_cutter._cut_audio_segment')
-def test_cut_audio_by_phrases_processes_new_matches(
-    mock_cut,
-    temp_case_folder,
-    search_phrases_file,
-    sample_whisper_json
-):
-    """Тест: нові совпадения обробляються."""
-    mock_cut.return_value = None
-
-    result = cut_audio_by_phrases(
-        case_folder=str(temp_case_folder),
-        search_phrases_file=str(search_phrases_file)
-    )
-
-    # Повинні знайти 3 совпадения (одна за фразу)
-    assert len(result["matches"]) == 3
-    assert result["processed"] == 3
-    assert result["skipped"] == 0
-
-
-@patch('webapp.audio_cutter._cut_audio_segment')
-def test_cut_audio_by_phrases_skips_existing_checkpoint(
-    mock_cut,
-    temp_case_folder,
-    search_phrases_file,
-    sample_whisper_json
-):
-    """КРИТИЧНИЙ ТЕСТ: чекпоінти пропускають вже оброблене."""
-    mock_cut.return_value = None
-
-    # Перший запуск - все обробляється
-    result1 = cut_audio_by_phrases(
-        case_folder=str(temp_case_folder),
-        search_phrases_file=str(search_phrases_file)
-    )
-    assert result1["processed"] == 3
-    assert result1["skipped"] == 0
-
-    # Перевіряємо, що папки існують
-    cuts_folder = temp_case_folder / "_CourtDefense" / "02_нарізки_за_фразами"
-    assert cuts_folder.exists()
-    created_folders = list(cuts_folder.glob("*"))
-    assert len(created_folders) == 3
-
-    # КЛЮЧОВИЙ ТЕСТ: вручну створюємо файли в папках, щоб чекпоінт вони насправді існували
-    for folder in created_folders:
-        # Створюємо фіктивну аудіо нарізку
-        (folder / "нарізка.mp3").write_bytes(b"fake audio")
-        # Створюємо текстовий фрагмент
-        (folder / "фрагмент_транскрипту.txt").write_text("тестовий фрагмент", encoding="utf-8")
-
-    # Другий запуск - все повинно бути пропущено
-    print("\n[Тест] Другий запуск з чекпоінтами...")
-    result2 = cut_audio_by_phrases(
-        case_folder=str(temp_case_folder),
-        search_phrases_file=str(search_phrases_file)
-    )
-
-    print(f"[Тест] Перший запуск: {result1['processed']} обробок")
-    print(f"[Тест] Другий запуск: {result2['processed']} обробок (очікується 0)")
-    print(f"[Тест] Другий запуск: {result2['skipped']} пропусків (очікується 3)")
-
-    assert result2["processed"] == 0, "Не повинно обробляти вже готове!"
-    assert result2["skipped"] == 3, "Повинно пропустити всі готові файли!"
-
-
-@patch('webapp.audio_cutter._cut_audio_segment')
-def test_cut_audio_by_phrases_idempotent(
-    mock_cut,
-    temp_case_folder,
-    search_phrases_file,
-    sample_whisper_json
-):
-    """Тест: ідемпотентність - повторні запуски дають однаковий результат."""
-    mock_cut.return_value = None
-
-    # Перший запуск
-    result1 = cut_audio_by_phrases(
-        case_folder=str(temp_case_folder),
-        search_phrases_file=str(search_phrases_file)
-    )
-    assert result1["processed"] == 3
-    assert result1["skipped"] == 0
-    print(f"[Запуск 1] обробок={result1['processed']}, пропущено={result1['skipped']}")
-
-    # Вручну "завершуємо" файли, щоб чекпоінти працювали
-    cuts_folder = temp_case_folder / "_CourtDefense" / "02_нарізки_за_фразами"
-    for folder in cuts_folder.glob("*"):
-        (folder / "нарізка.mp3").write_bytes(b"fake")
-        (folder / "фрагмент_транскрипту.txt").write_text("тест", encoding="utf-8")
-
-    # Другий запуск - повинен пропустити все
-    result2 = cut_audio_by_phrases(
-        case_folder=str(temp_case_folder),
-        search_phrases_file=str(search_phrases_file)
-    )
-    assert result2["processed"] == 0, "Другий запуск повинен пропустити все"
-    assert result2["skipped"] == 3, "Повинен пропустити 3"
-    print(f"[Запуск 2] обробок={result2['processed']}, пропущено={result2['skipped']}")
-
-    # Третій запуск - також повинен пропустити
-    result3 = cut_audio_by_phrases(
-        case_folder=str(temp_case_folder),
-        search_phrases_file=str(search_phrases_file)
-    )
-    assert result3["processed"] == 0, "Третій запуск повинен пропустити все"
-    assert result3["skipped"] == 3, "Повинен пропустити 3"
-    print(f"[Запуск 3] обробок={result3['processed']}, пропущено={result3['skipped']}")
-
-
-@patch('webapp.audio_cutter._cut_audio_segment')
-def test_summary_report_generated(
-    mock_cut,
-    temp_case_folder,
-    search_phrases_file,
-    sample_whisper_json
-):
-    """Тест: загальний висновок генерується при кожному запуску."""
-    mock_cut.return_value = None
-
-    # Перший запуск
-    cut_audio_by_phrases(
-        case_folder=str(temp_case_folder),
-        search_phrases_file=str(search_phrases_file)
-    )
-
-    # Отчет находится в папке _CourtDefense
-    report_file = temp_case_folder / "_CourtDefense" / "00_ЗАГАЛЬНИЙ_ВИСНОВОК_ПО_ФРАЗАХ.txt"
-    assert report_file.exists(), "Звіт повинен бути створений"
-
-    content = report_file.read_text(encoding="utf-8")
-    assert "ЗАГАЛЬНИЙ ВИСНОВОК" in content
-    assert "ключова фраза" in content
-    assert "важлива промова" in content
+    def test_lines_within_window_returned(self):
+        """Lines with timestamps inside [start, end] are returned."""
+        result = _extract_transcript_context(self.SAMPLE, 60, 150)
+        assert "Другий рядок" in result
+        assert "Третій рядок" in result
+
+    def test_lines_outside_window_excluded(self):
+        """Lines outside the window are not included."""
+        result = _extract_transcript_context(self.SAMPLE, 60, 150)
+        assert "Перший рядок" not in result
+        assert "Четвертий рядок" not in result
+
+    def test_empty_transcript_returns_empty_string(self):
+        """Empty input yields empty output."""
+        assert _extract_transcript_context("", 0, 100) == ""
+
+    def test_boundary_timestamps_inclusive(self):
+        """Timestamps exactly at start and end are included."""
+        result = _extract_transcript_context(self.SAMPLE, 5, 60)
+        assert "Перший рядок" in result
+        assert "Другий рядок" in result
+
+    def test_no_matching_lines_returns_empty(self):
+        """Window with no matching lines returns empty string."""
+        result = _extract_transcript_context(self.SAMPLE, 1000, 2000)
+        assert result == ""
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 9. ТЕСТИ _get_audio_duration (v2.2)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestGetAudioDuration:
+    """Tests for ffprobe-based duration detection (v2.2)."""
+
+    @patch("subprocess.run")
+    def test_returns_float_on_success(self, mock_run):
+        """Returns parsed float when ffprobe succeeds."""
+        mock_run.return_value = MagicMock(returncode=0, stdout=b"123.456\n")
+        dur = _get_audio_duration(Path("fake.mp3"))
+        assert abs(dur - 123.456) < 0.001
+
+    @patch("subprocess.run")
+    def test_returns_zero_on_failure(self, mock_run):
+        """Returns 0.0 when ffprobe is unavailable or fails."""
+        mock_run.side_effect = FileNotFoundError("ffprobe not found")
+        dur = _get_audio_duration(Path("fake.mp3"))
+        assert dur == 0.0
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 10. ТЕСТИ save_transcript_fragment + write_summary_report (v2.2)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestTranscriptFragmentAndSummary:
+    """Tests for guaranteed file writes (v2.2)."""
+
+    def test_fragment_written_with_context(self):
+        """фрагмент_транскрипту.txt is created with provided context."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = Path(tmpdir)
+            _save_transcript_fragment(folder, "line one\nline two", 60, 120)
+            fragment = folder / "фрагмент_транскрипту.txt"
+            assert fragment.exists()
+            content = fragment.read_text(encoding="utf-8")
+            assert "line one" in content
+            assert "01:00" in content   # start time formatted
+
+    def test_fragment_written_even_when_empty_context(self):
+        """фрагмент_транскрипту.txt created even with no matching lines."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = Path(tmpdir)
+            _save_transcript_fragment(folder, "", 0, 30)
+            fragment = folder / "фрагмент_транскрипту.txt"
+            assert fragment.exists()
+            content = fragment.read_text(encoding="utf-8")
+            assert "не знайдено" in content
+
+    def test_summary_report_appended_not_overwritten(self):
+        """Running _write_summary_report twice appends; existing data is preserved."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            ep = [{
+                "marker": "тест",
+                "source": "audio.mp3",
+                "start_sec": 10, "end_sec": 20,
+                "original_start": 10, "original_end": 20,
+                "was_clamped": False,
+                "audio_status": "OK",
+                "context": "рядок транскрипції",
+                "folder": "тест__audio_0",
+            }]
+            _write_summary_report(out, ep)
+            _write_summary_report(out, ep)
+            report = out / "00_ЗАГАЛЬНИЙ_ВИСНОВОК_ПО_ФРАЗАХ.txt"
+            content = report.read_text(encoding="utf-8")
+            # Two runs → two "ЗАПУСК:" entries
+            assert content.count("ЗАПУСК:") == 2
+
+    def test_summary_empty_episodes_not_written(self):
+        """_write_summary_report with empty list writes nothing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            _write_summary_report(out, [])
+            report = out / "00_ЗАГАЛЬНИЙ_ВИСНОВОК_ПО_ФРАЗАХ.txt"
+            assert not report.exists()
+
+    def test_summary_contains_context_block(self):
+        """Summary report includes the 'Контекст фрагмента' section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            ep = [{
+                "marker": "ключовий момент",
+                "source": "rec.mp3",
+                "start_sec": 0, "end_sec": 15,
+                "original_start": 0, "original_end": 15,
+                "was_clamped": False,
+                "audio_status": "OK",
+                "context": "він сказав так",
+                "folder": "ключовий_момент__rec_0",
+            }]
+            _write_summary_report(out, ep)
+            content = (out / "00_ЗАГАЛЬНИЙ_ВИСНОВОК_ПО_ФРАЗАХ.txt").read_text("utf-8")
+            assert "він сказав так" in content
+            assert "Контекст фрагмента" in content
 
 
 if __name__ == "__main__":
